@@ -3,6 +3,7 @@ import type { RiverConfig } from '../config';
 import { PoseTrack, STAR_NODES, CONSTELLATION_LINKS } from '../interaction/PoseTrack';
 import { easingAlpha } from '../interaction/field';
 import { flowFunctions } from './organicShaders';
+import { HumanStarField } from './HumanStarField';
 
 const vertex=/* glsl */`
 uniform float uPixelRatio;
@@ -39,6 +40,7 @@ vColor=mix(vec3(.43,.79,.78),vec3(.84,.67,.34),step(.91,dustSeed));
 gl_Position=vec4(vec2(x,y)*2.-1.,0.,1.);gl_PointSize=(2.+dustSeed*2.)*uPixelRatio;}`;
 
 type Trail={x:number;y:number;time:number;confidence:number};
+const STAR_CAPACITY=36*61; // All nodes plus up to 60 history samples per node.
 export class HumanConstellation {
   readonly scene=new THREE.Scene();
   private starGeometry=new THREE.BufferGeometry();
@@ -50,10 +52,10 @@ export class HumanConstellation {
   private dustGeometry=new THREE.BufferGeometry();
   private dustMaterial:THREE.ShaderMaterial;
   private dust:THREE.Points;
-  private positions=new Float32Array(1500*3);
-  private alphas=new Float32Array(1500);
-  private sizes=new Float32Array(1500);
-  private colors=new Float32Array(1500*3);
+  private positions=new Float32Array(STAR_CAPACITY*3);
+  private alphas=new Float32Array(STAR_CAPACITY);
+  private sizes=new Float32Array(STAR_CAPACITY);
+  private colors=new Float32Array(STAR_CAPACITY*3);
   private curvePositions=new Float32Array(CONSTELLATION_LINKS.length*24*6*3);
   private curveAlphas=new Float32Array(CONSTELLATION_LINKS.length*24*6);
   private curveSides=new Float32Array(CONSTELLATION_LINKS.length*24*6);
@@ -68,7 +70,9 @@ export class HumanConstellation {
   private lastHistory=-Infinity;
   private previousTime=0;
   private count=0;
-  constructor(pixelRatio:number){
+  private bodyField:HumanStarField;
+  constructor(pixelRatio:number,field:THREE.DataTexture){
+    this.bodyField=new HumanStarField(field,pixelRatio);this.scene.add(this.bodyField.group);
     const dynamic=(array:Float32Array,size:number)=>new THREE.BufferAttribute(array,size).setUsage(THREE.DynamicDrawUsage);
     this.starGeometry.setAttribute('position',dynamic(this.positions,3));
     this.starGeometry.setAttribute('starAlpha',dynamic(this.alphas,1));this.starGeometry.setAttribute('starSize',dynamic(this.sizes,1));this.starGeometry.setAttribute('starColor',dynamic(this.colors,3));
@@ -84,11 +88,11 @@ export class HumanConstellation {
     this.scene.add(this.curves,this.dust,this.stars);
   }
   private star(x:number,y:number,size:number,alpha:number,gold:boolean){
-    const n=this.count++;if(n>=1500)return;
+    const n=this.count++;if(n>=STAR_CAPACITY)return;
     this.positions[n*3]=x;this.positions[n*3+1]=y;this.sizes[n]=size;this.alphas[n]=alpha;
     this.colors.set(gold?[.88,.69,.36]:[.65,.89,.93],n*3);
   }
-  update(track:PoseTrack,time:number,dt:number,aspect:number,config:RiverConfig){
+  update(track:PoseTrack,time:number,dt:number,aspect:number,config:RiverConfig,maskPresence:number){
     const enabled=config.constellation&&config.stage>=2;
     this.scene.visible=enabled;
     if(time<this.previousTime){this.history=STAR_NODES.map(()=>[]);this.dustBorn.fill(-1000);this.lastHistory=-Infinity;}
@@ -96,11 +100,13 @@ export class HumanConstellation {
     const sample=time-this.lastHistory>1/24;
     if(sample)this.lastHistory=time;
     const form=track.formation;
+    this.bodyField.update(time,aspect,maskPresence,form,config);
     STAR_NODES.forEach((index,k)=>{
       const j=track.joints[index],gold=index===15||index===24;
-      const weight=index===0?1.3:[15,16,11,12,23,24].includes(index)?1.15:[7,8,31,32,33,34,35].includes(index)?.60:.88;
+      const faceDetail=index>=1&&index<=10,handDetail=index>=17&&index<=22;
+      const weight=faceDetail?.36:handDetail?.46:index===0?1.3:[15,16,11,12,23,24].includes(index)?1.15:[29,30,31,32,33,34,35].includes(index)?.60:.88;
       const breathe=.9+.1*Math.sin(time*.85+index*.61);
-      const alpha=j.confidence*form*config.nodeBrightness*breathe;
+      const alpha=j.confidence*form*config.nodeBrightness*breathe*(faceDetail?.5:handDetail?.65:1.);
       this.star(j.x,j.y,config.nodeSize*weight*3.,alpha,gold);
       const history=this.history[k];
       if(sample&&alpha>.04)history.push({x:j.x,y:j.y,time,confidence:j.confidence});
@@ -110,22 +116,23 @@ export class HumanConstellation {
         this.star(old.x,old.y,config.nodeSize*weight*2.1,old.confidence*form*config.nodeBrightness*(1-age)**2*.22,gold);
       }
     });
-    this.starGeometry.setDrawRange(0,Math.min(1500,this.count));
+    this.starGeometry.setDrawRange(0,Math.min(STAR_CAPACITY,this.count));
     for(const key of ['position','starAlpha','starSize','starColor'])this.starGeometry.getAttribute(key).needsUpdate=true;
     let v=0;
     CONSTELLATION_LINKS.forEach(([a,b],edge)=>{
       const p=track.joints[a],q=track.joints[b];
+      const fineFace=a<=10&&b<=10,fineHand=(a>=15&&a<=22)&&(b>=15&&b<=22);
       const dx=(q.x-p.x)*aspect,dy=q.y-p.y,length=Math.hypot(dx,dy);
       const nx=-dy/Math.max(.001,length),ny=dx/Math.max(.001,length);
       const lag=Math.max(-.008,Math.min(.008,((p.vx+q.vx)*aspect*nx+(p.vy+q.vy)*ny)*config.poseSmoothing*.035));
       this.bends[edge]+=(lag-this.bends[edge])*easingAlpha(dt,.18);
-      const bend=this.bends[edge]+Math.sin(time*.65+edge*1.7)*.0018;
+      const bend=(this.bends[edge]+Math.sin(time*.65+edge*1.7)*.0018)*Math.min(1,length/.08);
       const cx=(p.x+q.x)*.5+nx*bend/aspect,cy=(p.y+q.y)*.5+ny*bend;
-      const alpha=length>.65||length<.002?0:Math.min(p.confidence,q.confidence)*form*config.connectionOpacity;
+      const alpha=length>.65||length<.0003?0:Math.min(p.confidence,q.confidence)*form*config.connectionOpacity*(fineFace?.5:fineHand?.65:1.);
       const point=(t:number,side:number)=>{
         const x=(1-t)**2*p.x+2*(1-t)*t*cx+t*t*q.x,y=(1-t)**2*p.y+2*(1-t)*t*cy+t*t*q.y;
         const tx=2*((1-t)*(cx-p.x)+t*(q.x-cx))*aspect,ty=2*((1-t)*(cy-p.y)+t*(q.y-cy));
-        const l=Math.max(.001,Math.hypot(tx,ty)),width=1.65/innerHeight;
+        const l=Math.max(.0001,Math.hypot(tx,ty)),width=(fineFace?.8:fineHand?1.05:1.65)/innerHeight;
         this.curvePositions[v*3]=x-ty/l*width*side/aspect;this.curvePositions[v*3+1]=y+tx/l*width*side;
         this.curveAlphas[v]=alpha*(.9+.1*Math.sin(time*.5+edge));this.curveSides[v]=side;v++;
       };
@@ -142,5 +149,5 @@ export class HumanConstellation {
     this.dustGeometry.getAttribute('position').needsUpdate=true;this.dustGeometry.getAttribute('born').needsUpdate=true;
     this.dustMaterial.uniforms.uTime.value=time;this.dustMaterial.uniforms.uAspect.value=aspect;
   }
-  dispose(){for(const geometry of [this.starGeometry,this.curveGeometry,this.dustGeometry])geometry.dispose();for(const material of [this.starMaterial,this.curveMaterial,this.dustMaterial])material.dispose();}
+  dispose(){this.bodyField.dispose();for(const geometry of [this.starGeometry,this.curveGeometry,this.dustGeometry])geometry.dispose();for(const material of [this.starMaterial,this.curveMaterial,this.dustMaterial])material.dispose();}
 }

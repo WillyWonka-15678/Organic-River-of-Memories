@@ -42,7 +42,7 @@ export class River {
     this.quadScene.add(this.quad);
     this.silk=new SilkLayers(field);this.scene.add(this.silk.mesh);
     this.memories=new MemoryLayer(field,this.renderer.getPixelRatio());this.memoryScene.add(this.memories.points);
-    this.constellation=new HumanConstellation(this.renderer.getPixelRatio());
+    this.constellation=new HumanConstellation(this.renderer.getPixelRatio(),field);
     this.rebuild(config.count);
     this.resize();
   }
@@ -102,7 +102,7 @@ export class River {
     u.uStage.value = c.stage; u.uPresence.value = presence; u.uRepulsion.value = c.repulsion; u.uRadius.value = c.radius;
     u.uHandForce.value=c.constellation&&c.stage>=2?c.wristAttraction:0;
     for(let i=0;i<2;i++){const hand=pose.wrist(i as 0|1);u.uWrists.value[i].set(hand.x,hand.y,hand.strength,hand.activity);}
-    this.constellation.update(pose,time,dt,innerWidth/innerHeight,c);
+    this.constellation.update(pose,time,dt,innerWidth/innerHeight,c,presence);
     this.compute.compute();
     this.initializing = false;
     const p = this.points.material.uniforms;

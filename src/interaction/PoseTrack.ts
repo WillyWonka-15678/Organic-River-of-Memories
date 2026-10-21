@@ -2,8 +2,14 @@ import { easingAlpha } from './field';
 export interface CameraLandmark { x:number;y:number;z?:number;visibility?:number;presence?:number }
 export interface PosePoint { x:number;y:number;z:number;confidence:number }
 export interface TrackedJoint extends PosePoint { vx:number;vy:number }
-export const STAR_NODES=[0,7,8,11,12,13,14,15,16,23,24,25,26,27,28,31,32,33,34,35];
-export const CONSTELLATION_LINKS=[[0,33],[7,0],[0,8],[33,11],[33,12],[11,13],[13,15],[12,14],[14,16],[33,34],[34,35],[35,23],[35,24],[23,25],[25,27],[24,26],[26,28],[27,31],[28,32]];
+export const STAR_NODES=Array.from({length:36},(_,i)=>i);
+export const CONSTELLATION_LINKS=[
+  [0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8],[9,10],[0,9],[0,10],
+  [0,33],[33,11],[33,12],[11,12],[33,34],[34,35],[35,23],[35,24],
+  [11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],
+  [15,17],[15,19],[15,21],[17,19],[16,18],[16,20],[16,22],[18,20],
+  [23,25],[25,27],[24,26],[26,28],[27,29],[29,31],[27,31],[28,30],[30,32],[28,32],
+];
 const movingJoints=[11,12,13,14,15,16,23,24,25,26,27,28];
 export function mapPose(points:CameraLandmark[]):PosePoint[]{
   return points.slice(0,33).map(p=>{

@@ -6,5 +6,6 @@ export const config = {
   demo: false, mirror: true, showMask: false, inferenceFps: 20,
   constellation: true, nodeSize: 6.0, nodeBrightness: 1.0,
   connectionOpacity: .38, poseSmoothing: .10, constellationTrails: .65, wristAttraction: .65,
+  bodyStarDensity: .82, bodyWeb: .75, bodyAura: .8,
 };
 export type RiverConfig = typeof config;
