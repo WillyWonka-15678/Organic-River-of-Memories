@@ -1,0 +1,52 @@
+import {test,expect} from '@playwright/test';
+test('人体星座：姿态映射、手腕流场、静止消散与 Mask 共存',async({page})=>{
+  test.skip(process.env.RIVER_TEST_PRODUCTION==='1','合成关键点仅在开发 QA 模式开放');
+  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
+  await page.goto('/?qa=1');
+  await expect.poll(()=>page.evaluate(()=>(window as any).__river?.frames??0)).toBeGreaterThan(10);
+  await page.evaluate(()=>{
+    const win=window as any;win.__poseStudy={moving:true,phase:0,occluded:false};
+    win.__riverQA.injectSilhouette(0);
+    win.__poseTimer=setInterval(()=>{
+      const state=win.__poseStudy;if(state.moving)state.phase+=.14;
+      const points=Array.from({length:33},()=>({x:.5,y:.5,visibility:0}));
+      const put=(id:number,x:number,y:number)=>{points[id]={x,y,visibility:.98};};
+      put(0,.49,.27);put(7,.46,.27);put(8,.52,.27);
+      put(11,.44,.41);put(12,.60,.41);put(13,.38,.51);put(14,.68,.40);
+      put(15,.34,.59+Math.sin(state.phase)*.045);put(16,.72+Math.sin(state.phase)*.025,.26);
+      put(23,.45,.72);put(24,.58,.72);put(25,.44,.84);put(26,.59,.84);
+      put(27,.42,.95);put(28,.61,.95);put(31,.40,.97);put(32,.63,.97);
+      if(state.occluded)points[16].visibility=.1;
+      win.__riverQA.injectPose(points);
+    },50);
+  });
+  await expect.poll(()=>page.evaluate(()=>(window as any).__river.poseNodes)).toBeGreaterThan(15);
+  await expect.poll(()=>page.evaluate(()=>(window as any).__river.formation)).toBeGreaterThan(.4);
+  const hands=await page.evaluate(()=>(window as any).__river.wrists);
+  expect(hands[0].x).toBeCloseTo(.34,1);expect(hands[1].y).toBeCloseTo(.74,1);
+  expect(hands[0].strength).toBeGreaterThan(.2);
+  await expect.poll(()=>page.evaluate(()=>(window as any).__river.presence)).toBeGreaterThan(.85);
+  const initialFrame=await page.evaluate(()=>(window as any).__river.frames);
+  await expect.poll(()=>page.evaluate(()=>(window as any).__river.frames),{timeout:20000}).toBeGreaterThan(initialFrame+60);
+  await page.keyboard.press('h');
+  await page.screenshot({path:'test-results/constellation-motion.png'});
+  await page.evaluate(()=>(window as any).__poseStudy.occluded=true);
+  await expect.poll(()=>page.evaluate(()=>(window as any).__river.wrists[1].strength)).toBeLessThan(.02);
+  await page.evaluate(()=>(window as any).__poseStudy.moving=false);
+  await expect.poll(()=>page.evaluate(()=>(window as any).__river.formation),{timeout:20000}).toBeLessThan(.12);
+  expect(await page.evaluate(()=>(window as any).__river.poseNodes)).toBeGreaterThan(14);
+  await page.screenshot({path:'test-results/constellation-still-dissolve.png'});
+  await page.evaluate(()=>{clearInterval((window as any).__poseTimer);(window as any).__riverQA.clearPose();});
+  await expect.poll(()=>page.evaluate(()=>(window as any).__river.poseNodes),{timeout:10000}).toBe(0);
+  expect(await page.evaluate(()=>(window as any).__river.presence)).toBeGreaterThan(.6);
+  expect(errors).toEqual([]);
+});
+test('姿态模型加载失败时，Mask 与摄像头仍可继续运行',async({page,context})=>{
+  await context.route('**/models/pose_landmarker_lite.task',route=>route.abort());
+  await page.goto('/');await page.getByRole('button',{name:'开启摄像头'}).click();
+  await expect(page.locator('#status')).toContainText('轮廓互动仍在运行',{timeout:45000});
+  expect(await page.evaluate(()=>(window as any).__river.camera)).toBe(true);
+  expect(await page.evaluate(()=>(window as any).__river.poseReady)).toBe(false);
+  const first=await page.evaluate(()=>(window as any).__river.lastMaskTime);
+  await expect.poll(()=>page.evaluate(()=>(window as any).__river.lastMaskTime),{timeout:15000}).toBeGreaterThan(first);
+});

@@ -27,7 +27,7 @@ test('GPU 渲染、调试面板、粒子重建与窗口变化', async ({ page })
   await page.keyboard.press('d');
   await page.screenshot({ path: 'test-results/river-upper-body.png' });
   await page.keyboard.press('d');
-  await page.locator('.lil-gui select').selectOption({ label: '16,384' });
+  await page.getByRole('combobox', { name: '粒子数量' }).selectOption({ label: '16,384' });
   await expect.poll(() => page.evaluate(() => (window as any).__river.particleCount)).toBe(16384);
   await page.locator('#river').click({ position: { x: 15, y: 600 } });
   await page.keyboard.press('h'); await expect(page.locator('#intro')).toBeHidden();
@@ -50,8 +50,10 @@ test('真实 MediaPipe Worker 用模拟摄像头完成推理且能关闭恢复',
   await expect.poll(async () => {
     const text = await page.locator('#status').textContent();
     if (text?.includes('摄像头不可用')) throw new Error(text);
-    return text?.includes('人体分割运行中');
+    return text?.includes('河流已感知你的身影');
   }, { timeout: 45000 }).toBe(true);
+  await expect.poll(()=>page.evaluate(()=>(window as any).__river.poseReady)).toBe(true);
+  await expect.poll(()=>page.evaluate(()=>(window as any).__river.lastPoseTime)).toBeGreaterThan(0);
   const first = await page.evaluate(() => (window as any).__river.lastMaskTime);
   await expect.poll(() => page.evaluate(() => (window as any).__river.lastMaskTime), { timeout: 15000 }).toBeGreaterThan(first);
   await page.getByRole('button', { name: '关闭摄像头' }).click();

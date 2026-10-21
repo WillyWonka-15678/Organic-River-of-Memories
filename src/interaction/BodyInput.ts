@@ -1,13 +1,19 @@
 import { publish } from '../integrations/events';
 import { signedDistance } from './field';
-import { estimateUpperBodies, type UpperBody } from './upperBody';
+import { mapPose, type PosePoint, type CameraLandmark } from './PoseTrack';
 export class BodyInput {
   readonly width = 192;
   readonly height = 108;
   target = new Float32Array(this.width * this.height).fill(2);
   lastMaskTime = 0;
   coverage = 0;
-  upperBodies: UpperBody[] = [];
+  mask = new Uint8Array(this.width * this.height);
+  motion = new Float32Array(this.width * this.height * 2);
+  pose: PosePoint[] = [];
+  lastPoseTime = 0;
+  poseReady = false;
+  poseWarning = '';
+  private centroid?: { x: number; y: number; time: number };
   running = false;
   private stream?: MediaStream;
   private worker?: Worker;
@@ -20,7 +26,7 @@ export class BodyInput {
   private canvas = document.createElement('canvas');
   private context = this.canvas.getContext('2d', { willReadFrequently: true })!;
   constructor(private video: HTMLVideoElement, private status: (text: string) => void) {
-    this.canvas.width = this.width; this.canvas.height = this.height;
+    this.canvas.width = 640; this.canvas.height = 360;
   }
   async start() {
     this.stop();
@@ -38,15 +44,18 @@ export class BodyInput {
         const timeout = setTimeout(() => reject(new Error('模型初始化超时，请运行 npm run assets 后重试。')), 30000);
         this.worker!.onerror = e => { clearTimeout(timeout); reject(new Error(e.message)); };
         this.worker!.onmessage = ({ data }) => {
-          if (data.type === 'ready') { clearTimeout(timeout); resolve(); }
+          if (data.type === 'ready') { this.poseReady = data.poseReady; clearTimeout(timeout); resolve(); }
+          if (data.type === 'pose-warning') this.poseWarning = data.message;
           if (data.type === 'error') { clearTimeout(timeout); reject(new Error(data.message)); }
         };
         this.worker!.postMessage({ type: 'init' });
       });
       if (generation !== this.generation) return;
       this.worker!.onmessage = ({ data }) => {
-        this.pending = false;
         if (data.type === 'mask') {
+          this.pending = false;
+          this.poseReady = data.poseReady;
+          if(data.landmarks!==undefined)this.acceptPose(data.landmarks);
           const raw: Uint8Array = data.mask;
           // Resample model output to the fixed screen-space field grid.
           const mask = new Uint8Array(this.width * this.height);
@@ -55,13 +64,10 @@ export class BodyInput {
             const v = raw[Math.floor(y / this.height * data.height) * data.width + Math.floor(x / this.width * data.width)];
             mask[(this.height - 1 - y) * this.width + x] = v; sum += v > 127 ? 1 : 0;
           }
-          this.coverage = sum / mask.length;
-          this.target = signedDistance(mask, this.width, this.height);
-          this.upperBodies = estimateUpperBodies(mask, this.width, this.height);
-          this.lastMaskTime = performance.now();
-          publish('presence', { coverage: this.coverage, timestamp: data.timestamp });
-          this.status(`人体分割运行中 · 轮廓占比 ${(this.coverage * 100).toFixed(0)}%`);
-        } else if (data.type === 'error') this.fail(data.message);
+          this.acceptMask(mask, data.timestamp);
+          this.status(this.poseWarning ? '星座识别暂不可用，轮廓互动仍在运行。' : `人体分割运行中 · 轮廓占比 ${(this.coverage * 100).toFixed(0)}%`);
+        } else if(data.type==='pose-warning') { this.poseWarning=data.message;this.pose=[]; }
+        else if (data.type === 'error') this.fail(data.message);
       };
       this.worker!.onerror = e => this.fail(e.message);
       this.stream.getVideoTracks()[0].onended = () => this.fail('摄像头已断开，请重新开启。');
@@ -75,13 +81,15 @@ export class BodyInput {
     }
     if (!this.running || this.pending || now - this.lastFrame < 1000 / fps || this.video.readyState < 2 || this.lastVideoTime === this.video.currentTime) return;
     this.pending = true; this.lastFrame = now; this.submittedAt = now; this.lastVideoTime = this.video.currentTime;
-    const ctx = this.context, w = this.width, h = this.height;
+    const ctx = this.context, w = this.canvas.width, h = this.canvas.height;
     // object-fit: cover, shared by preview and segmentation; mirrored exactly once.
-    const scale = Math.max(w / this.video.videoWidth, h / this.video.videoHeight);
-    const dw = this.video.videoWidth * scale, dh = this.video.videoHeight * scale;
+    const aspect = innerWidth / innerHeight;
+    const sourceAspect = this.video.videoWidth / this.video.videoHeight;
+    const sw = sourceAspect > aspect ? this.video.videoHeight * aspect : this.video.videoWidth;
+    const sh = sourceAspect > aspect ? this.video.videoHeight : this.video.videoWidth / aspect;
     ctx.save(); ctx.clearRect(0, 0, w, h);
     if (mirror) { ctx.translate(w, 0); ctx.scale(-1, 1); }
-    ctx.drawImage(this.video, (w - dw) / 2, (h - dh) / 2, dw, dh); ctx.restore();
+    ctx.drawImage(this.video, (this.video.videoWidth - sw) / 2, (this.video.videoHeight - sh) / 2, sw, sh, 0, 0, w, h); ctx.restore();
     const generation = this.generation;
     createImageBitmap(this.canvas).then(bitmap => {
       if (generation !== this.generation || !this.worker) { bitmap.close(); return; }
@@ -89,11 +97,34 @@ export class BodyInput {
     }).catch(error => this.fail(String(error)));
   }
   private fail(message: string) { this.stop(); this.status(`摄像头不可用：${message}；可继续使用演示模式。`); }
+  acceptPose(landmarks: CameraLandmark[]) {
+    // Camera pixels were mirrored/cropped before inference. Only invert y here.
+    this.pose=mapPose(landmarks);this.lastPoseTime=performance.now();
+  }
+  acceptMask(mask: Uint8Array, timestamp: number) {
+    let count = 0, cx = 0, cy = 0;
+    for (let i = 0; i < mask.length; i++) if (mask[i] > 127) { count++; cx += i % this.width; cy += Math.floor(i / this.width); }
+    cx /= Math.max(1, count) * this.width; cy /= Math.max(1, count) * this.height;
+    const dt = this.centroid ? Math.max(.03, (timestamp - this.centroid.time) / 1000) : .05;
+    const vx = this.centroid && count ? Math.max(-.5, Math.min(.5, (cx - this.centroid.x) / dt)) : 0;
+    const vy = this.centroid && count ? Math.max(-.5, Math.min(.5, (cy - this.centroid.y) / dt)) : 0;
+    for (let i = 0; i < mask.length; i++) {
+      const change = Math.abs(mask[i] - this.mask[i]) / 255;
+      this.motion[i * 2] = vx * (change + (mask[i] > 127 ? .12 : 0));
+      this.motion[i * 2 + 1] = vy * (change + (mask[i] > 127 ? .12 : 0));
+    }
+    this.centroid = count ? { x: cx, y: cy, time: timestamp } : undefined;
+    this.mask.set(mask); this.coverage = count / mask.length;
+    this.target = signedDistance(mask, this.width, this.height, innerWidth / innerHeight);
+    this.lastMaskTime = performance.now();
+    publish('presence', { coverage: this.coverage, timestamp });
+  }
   stop() {
     this.generation++; this.running = false; this.pending = false;
     this.worker?.terminate(); this.worker = undefined;
     this.stream?.getTracks().forEach(t => { t.onended = null; t.stop(); }); this.stream = undefined;
     this.video.srcObject = null; this.target.fill(2); this.lastMaskTime = 0; this.coverage = 0;
-    this.upperBodies = [];
+    this.mask.fill(0); this.motion.fill(0); this.centroid = undefined;
+    this.pose=[];this.lastPoseTime=0;this.poseReady=false;this.poseWarning='';
   }
 }

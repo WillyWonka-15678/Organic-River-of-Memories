@@ -3,9 +3,9 @@
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><title>时光弹幕河 · 交互艺术原型</title></head>
 <body>
   <canvas id="river" aria-label="流动的发光粒子河流"></canvas>
-  <header id="intro"><span class="eyebrow">AN INTERACTIVE STUDY / 001</span><h1>时光弹幕河<span>THE RIVER OF PASSING TIME</span></h1><p>走入河流，让时光绕过你的身影。</p></header>
-  <aside id="controls"><button id="camera">开启摄像头</button><button id="fullscreen">全屏 ↗</button><button id="debug">调试 D</button><span id="status" role="status">演示流场 · 摄像头未开启</span></aside>
-  <footer id="caption"><span>FLOWING THROUGH YOU</span><span id="metrics">正在初始化 GPU…</span></footer>
+  <header id="intro"><h1>时光弹幕河<span>ORGANIC RIVER OF MEMORIES</span></h1></header>
+  <aside id="controls"><button id="camera">开启摄像头</button><button id="fullscreen">全屏 ↗</button><button id="debug" aria-label="创作参数 D">D</button><span id="status" role="status">走入河流，让记忆感知你的存在。</span></aside>
+  <footer id="caption"><span>远处是光 · 近处是回忆</span><span id="metrics">正在初始化…</span></footer>
   <video id="video" autoplay playsinline muted hidden></video>
   <canvas id="mask-preview" hidden></canvas>
   <script type="module" src="/src/main.ts"></script>
