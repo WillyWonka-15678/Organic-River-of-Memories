@@ -1,0 +1,29 @@
+{
+  "name": "time-bullet-river",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/build-worker.mjs",
+    "prebuild": "node scripts/build-worker.mjs",
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "assets": "node scripts/prepare-assets.mjs",
+    "test": "vitest run",
+    "test:browser": "playwright test"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "0.10.32",
+    "lil-gui": "0.21.0",
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "@playwright/test": "^1.56.0",
+    "@types/three": "^0.180.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.10",
+    "vitest": "^3.2.4"
+  }
+}
