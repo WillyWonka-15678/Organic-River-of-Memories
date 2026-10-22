@@ -55,6 +55,15 @@ gui.add(config, 'demo').name('演示人体排斥');
 gui.add(config, 'mirror').name('镜像摄像头');
 gui.add(config, 'showMask').name('显示轮廓调试').onChange((v: boolean) => { preview.hidden = !v; });
 gui.add(config, 'inferenceFps', 5, 30, 1).name('分割目标 FPS');
+const memoryPanel=gui.addFolder('记忆交互');
+memoryPanel.add(config,'memoryCount',1,6,1).name('漂流留言上限');
+memoryPanel.add(config,'memoryInterval',3,20,.5).name('生成间隔 / 秒');
+memoryPanel.add(config,'memorySpeed',.01,.06,.001).name('文字漂流速度');
+memoryPanel.add(config,'bodyTextSlowdown',.03,.15,.01).name('人体内速度倍率');
+memoryPanel.add(config,'captureRadius',.08,.3,.01).name('拾忆范围');
+memoryPanel.add(config,'captureHold',.4,1.5,.05).name('伸手停留 / 秒');
+memoryPanel.add(config,'memoryReleaseTime',2,6,.1).name('送别消散 / 秒');
+memoryPanel.close();
 const stars=gui.addFolder('人体星座');
 stars.add(config,'constellation').name('星座感知');
 stars.add(config,'nodeSize',2,9,.1).name('节点大小');
@@ -130,6 +139,9 @@ let studyPaused=false;let studyTime=0;
 let timeOffset = 0;
 if (import.meta.env.DEV && query.has('qa')) {
   Object.defineProperty(window, '__riverQA', { value: {
+    memoryState:()=>river.memories.interaction.items.map(m=>({...m})),
+    placeMemory:(x:number,y:number)=>river.memories.interaction.spawn({id:'qa-memory',message:'愿你始终热爱'},x,y),
+    clearMemories:()=>{river.memories.interaction.items=[];},
     pauseStudy:()=>{studyPaused=true;studyTime=diagnostics.time;},
     paletteStudy:(preset:PaletteName)=>{if(!(preset in palettes))throw new Error('Unknown palette');studyPaused=true;river.renderPaletteStudy(preset,studyTime,field.presence,poseTrack);},
     setPalette:(preset:PaletteName)=>{if(preset in palettes)config.palette=preset;},
@@ -170,7 +182,7 @@ function animate(now: number) {
     }
     previewCtx.putImageData(previewImage,0,0);
   }
-  poseTrack.update(body.pose,body.lastPoseTime,now,dt,config.poseSmoothing,innerWidth/innerHeight,config.constellation&&config.stage>=2&&(body.running||qaPoseActive));
+  poseTrack.update(body.pose,body.lastPoseTime,now,dt,config.poseSmoothing,innerWidth/innerHeight,(config.constellation||config.memories)&&config.stage>=2&&(body.running||qaPoseActive));
   const aspect=innerWidth/innerHeight,mapping=`${aspect}:${config.mirror}:${config.wakeInput}`;
   if(mapping!==wakeMapping){river.wake.motion.reset();river.wake.headMotion.reset();wakeMapping=mapping;}
   const motionSample=config.wakeInput==='mouse'?{...pointer,width:.15,stamp:now/1000}:torsoSample(body.pose,body.lastPoseTime/1000,aspect);
@@ -180,7 +192,8 @@ function animate(now: number) {
   if(config.wakeInput!=='pose'||(!body.running&&!qaPoseActive))head.valid=false;
   river.wake.headMotion.sample(head,now/1000,aspect,config.wakeThreshold*1.15,config.wakeSmoothing*1.25);
   river.wake.update(wakeDt,t,innerWidth/innerHeight,config);
-  river.update(t,dt,field.presence,poseTrack); frames++;
+  // Text follows elapsed time even below 20 FPS; cap long background-tab gaps.
+  river.update(t,dt,field.presence,poseTrack,Math.min(wakeDt,.25)); frames++;
   if (now-sampleTime>1000) {
     diagnostics.fps=Math.round(frames*1000/(now-sampleTime)); frames=0; sampleTime=now;
     $('metrics').textContent=`${diagnostics.fps} FPS / ${river.actualCount.toLocaleString()} PARTICLES / ${body.running?'CAMERA':active?'CONTOUR STUDY':'MEMORY RIVER'}`;

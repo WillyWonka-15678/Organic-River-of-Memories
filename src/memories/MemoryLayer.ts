@@ -1,3 +1,6 @@
+import { MemoryInteraction, memoryHands } from './MemoryInteraction';
+import type { PoseTrack } from '../interaction/PoseTrack';
+import type { RiverConfig } from '../config';
 import { paletteGLSL } from '../render/ColorSystem';
 import * as THREE from 'three';
 import { flowFunctions } from '../render/organicShaders';
@@ -7,49 +10,53 @@ import { studyMemories, type MemoryRecord } from './MemoryRecord';
 const vertex=/* glsl */`
 uniform float uTime,uAspect,uPresence,uPixelRatio;
 uniform sampler2D uField;
+uniform vec4 uAnchors[8],uMemoryState[8];
 attribute vec2 glyph;
 attribute vec4 memorySeed;
 attribute float memoryIndex;
-varying float vAlpha,vWarm;varying vec2 vPalettePosition;
+attribute vec2 glyphDetail;
+varying float vAlpha,vWarm,vFocus,vSpread;varying vec2 vPalettePosition;
 ${flowFunctions}
 void main(){
   vec4 s=memorySeed;
-  float phase=fract(uTime/36.+memoryIndex/3.+.18);
-  float gather=smoothstep(.08,.27,phase)*(1.-smoothstep(.56,.78,phase));
-  float visible=smoothstep(.01,.07,phase)*(1.-smoothstep(.88,.99,phase));
-  float anchorX=.16+phase*.63+memoryIndex*.055;
-  float group=mod(memoryIndex,3.);
-  vec2 anchor=vec2(anchorX,spine(anchorX,group,uTime)+(group<.5?.058:-.058));
-  vec2 target=anchor+glyph*vec2(1./uAspect,1.);
-  target.y+=sin(glyph.x*12.+uTime*.15)*.002;
-  float sourceX=fract(s.x+uTime*.023);
-  vec2 source=vec2(sourceX,streamY(sourceX,s,uTime,1.));
-  source+=vec2(s.y-.5,s.a-.5)*.11;
-  vec2 p=mix(source,target,gather);
-  float d=texture2D(uField,clamp(p,0.,1.)).r;
-  vec2 e=vec2(.006,0.);
-  vec2 n=vec2((texture2D(uField,p+e).r-texture2D(uField,p-e).r)/uAspect,texture2D(uField,p+e.yx).r-texture2D(uField,p-e.yx).r);
-  n/=max(length(n),.00001);
-  float feeling=exp(-abs(d)/.09)*uPresence;
-  p=mix(p,source,feeling*.22);
-  p+=n*.018*feeling/vec2(uAspect,1.);
-  vAlpha=visible*(.025+.85*gather)*(.8+s.a*.2);
+  vec4 anchor=uAnchors[int(memoryIndex)],state=uMemoryState[int(memoryIndex)];
+  float gather=smoothstep(0.,1.,state.x),release=smoothstep(.05,1.,state.y);
+  float focus=smoothstep(0.,1.,state.z),textScale=mix(1.,3.,focus);
+  vec2 p=anchor.xy+glyph*vec2(1./uAspect,1.)*textScale;
+  vec2 summon=anchor.xy+vec2((s.x-.5)*.22/uAspect,(s.y-.5)*.12);
+  p=mix(summon,p,gather);
+  // Only a deliberate release unfolds the intact glyph into gentle flowing dust.
+  float travel=state.y*state.y;
+  float slope=(spine(anchor.x+.003,anchor.z,uTime)-spine(anchor.x-.003,anchor.z,uTime))/.006;
+  p+=vec2(travel*(.10+s.x*.14)/uAspect,travel*(slope*.035+(s.y-.5)*.07));
+  p+=release*vec2(sin(s.a*6.283+state.y*2.),cos(s.a*6.283+state.y*1.3))*.012;
+  float visible=smoothstep(-.36,-.08,anchor.x)*(1.-smoothstep(1.05,1.30,anchor.x));
+  vAlpha=visible*(.12+.73*gather)*(.8+s.a*.2)*(1.-smoothstep(.55,1.,state.y))*(1.+focus*.15);
+  vAlpha*=glyphDetail.y;
+  vFocus=focus*(1.-release)*mix(1.,.35,glyphDetail.x);vSpread=1.+2.*vFocus;
   vWarm=.55+.45*s.y;vPalettePosition=p;
   gl_Position=vec4(p*2.-1.,0.,1.);
-  gl_PointSize=uPixelRatio*(1.+gather*1.7);
+  gl_PointSize=uPixelRatio*mix(mix(2.7,1.8,glyphDetail.x),1.4,release)*textScale*vSpread;
 }`;
 const fragment=/* glsl */`
 ${paletteGLSL}
-uniform float uAspect;uniform vec3 uColor,uAccent;varying float vAlpha,vWarm;varying vec2 vPalettePosition;
+uniform float uAspect;uniform vec3 uColor,uAccent;varying float vAlpha,vWarm,vFocus,vSpread;varying vec2 vPalettePosition;
 void main(){float r=length((gl_PointCoord-.5)*2.);if(r>1.)discard;
 vec3 color=mix(uColor,uAccent,vWarm);color=mix(color,vec3(.91,.93,.81),.17);
 color=riverPalette(color,vPalettePosition,uAspect,0.,vWarm,0.,0.);
-gl_FragColor=vec4(1.-exp(-color*1.35),exp(-r*r*2.)*vAlpha);
+// A crisp scaled glyph core plus a broad low-energy halo, independent of global Bloom.
+float coreR=r*vSpread;
+float core=exp(-coreR*coreR*2.)*(1.-smoothstep(.9,1.,coreR));
+float halo=exp(-r*r*5.)*(1.-smoothstep(.7,1.,r))*.12*vFocus;
+gl_FragColor=vec4(1.-exp(-color*1.35*(1.+vFocus*.45)),(core+halo)*vAlpha);
 #include <colorspace_fragment>
 }`;
 
 export class MemoryLayer {
   points: THREE.Points<THREE.BufferGeometry,THREE.ShaderMaterial>;
+  readonly interaction=new MemoryInteraction();
+  private signature='';
+  private glyphCache=new Map<string,number[]>();
   private records=[...studyMemories];
   private listener=(event:Event)=>{
     const detail=(event as CustomEvent<{id:string;text:string}>).detail;
@@ -59,36 +66,65 @@ export class MemoryLayer {
     const record=(event as CustomEvent<MemoryRecord>).detail;
     this.setRecords([...this.records.filter(r=>r.id!==record.id),record].slice(-6));
   };
-  constructor(field:THREE.DataTexture,pixelRatio:number){
+  constructor(private field:THREE.DataTexture,pixelRatio:number){
     const material=new THREE.ShaderMaterial({vertexShader:vertex,fragmentShader:fragment,
-      uniforms:{uTime:{value:0},uAspect:{value:1},uPresence:{value:0},uPixelRatio:{value:pixelRatio},uField:{value:field},uColor:{value:new THREE.Color()},uAccent:{value:new THREE.Color()}},
+      uniforms:{uAnchors:{value:Array.from({length:8},()=>new THREE.Vector4())},uMemoryState:{value:Array.from({length:8},()=>new THREE.Vector4())},uTime:{value:0},uAspect:{value:1},uPresence:{value:0},uPixelRatio:{value:pixelRatio},uField:{value:field},uColor:{value:new THREE.Color()},uAccent:{value:new THREE.Color()}},
       transparent:true,blending:THREE.AdditiveBlending,depthTest:false,depthWrite:false});
     this.points=new THREE.Points(new THREE.BufferGeometry(),material);this.points.frustumCulled=false;this.points.renderOrder=2;
     this.setRecords(this.records);riverEvents.addEventListener('text',this.listener);riverEvents.addEventListener('memory',this.recordListener);
   }
-  setRecords(records:MemoryRecord[]){
-    // The same contract can later be filled by a WebSocket/database adapter.
-    this.records=records.slice(0,6);
-    const glyph:number[]=[],seed:number[]=[],ids:number[]=[];
+  setRecords(records:MemoryRecord[]){this.records=records.filter(r=>typeof r.message==='string'&&r.message.trim()).slice(0,64);}
+  private rebuildGlyphs(){
+    const items=this.interaction.items,signature=items.map(m=>m.id).join(',');
+    if(signature===this.signature)return;this.signature=signature;
+    const glyph:number[]=[],seed:number[]=[],ids:number[]=[],detail:number[]=[];
     const canvas=document.createElement('canvas');canvas.width=640;canvas.height=100;
     const ctx=canvas.getContext('2d',{willReadFrequently:true})!;
-    this.records.forEach((record,index)=>{
-      ctx.clearRect(0,0,640,100);ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
-      ctx.font='400 28px "Microsoft YaHei", sans-serif';ctx.fillText(record.message.slice(0,24),320,39,580);
-      ctx.font='400 11px "Microsoft YaHei", sans-serif';ctx.fillText([record.name,record.year,record.major].filter(Boolean).join('  ·  '),320,73,580);
-      const pixels=ctx.getImageData(0,0,640,100).data;
-      for(let y=5;y<95;y+=2)for(let x=10;x<630;x+=2)if(pixels[(y*640+x)*4+3]>100){
-        glyph.push((x-320)*.00115,(50-y)*.00115);
-        seed.push(Math.random(),Math.random(),Math.random()*.9,Math.random());ids.push(index);
+    items.forEach((m,index)=>{
+      const record=m.record,key=JSON.stringify(record);
+      let samples=this.glyphCache.get(key);
+      if(!samples){
+        ctx.clearRect(0,0,640,100);ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.font='400 28px "Microsoft YaHei", sans-serif';ctx.fillText(record.message,320,39,580);
+        ctx.font='500 12px "Microsoft YaHei", sans-serif';ctx.fillText([record.name,record.year,record.major].filter(Boolean).join('  ·  '),320,77,580);
+        const pixels=ctx.getImageData(0,0,640,100).data;samples=[];
+        // Metadata uses every pixel and alpha coverage to retain small Chinese strokes.
+        // The main message keeps its existing two-pixel grain.
+        for(let y=5;y<95;y+=y<59?2:1)for(let x=10;x<630;x+=y<59?2:1){
+          const alpha=pixels[(y*640+x)*4+3]/255;
+          if(alpha>(y<59?100/255:.08))samples.push((x-320)*.00115,(50-y)*.00115,y<59?1:alpha*.9);
+        }
+        if(this.glyphCache.size>=64)this.glyphCache.delete(this.glyphCache.keys().next().value!);
+        this.glyphCache.set(key,samples);
+      }
+      for(let j=0;j<samples.length;j+=3){
+        glyph.push(samples[j],samples[j+1]);
+        detail.push(samples[j+1]<-.009?1:0,samples[j+2]);
+        // Stable grain prevents already held text from sparkling when another message spawns.
+        const hash=(n:number)=>{const x=Math.sin(n*127.1+m.id*19.7)*43758.5453;return x-Math.floor(x);};
+        seed.push(hash(j),hash(j+1),hash(j+2),hash(j+3));ids.push(index);
       }
     });
     const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(new Float32Array(ids.length*3),3));
     geometry.setAttribute('glyph',new THREE.Float32BufferAttribute(glyph,2));geometry.setAttribute('memorySeed',new THREE.Float32BufferAttribute(seed,4));geometry.setAttribute('memoryIndex',new THREE.Float32BufferAttribute(ids,1));
+    geometry.setAttribute('glyphDetail',new THREE.Float32BufferAttribute(detail,2));
     this.points.geometry.dispose();this.points.geometry=geometry;
   }
-  update(time:number,aspect:number,presence:number,color:string,accent:string){
-    const u=this.points.material.uniforms;u.uTime.value=time;u.uAspect.value=aspect;u.uPresence.value=presence;u.uColor.value.set(color);u.uAccent.value.set(accent);
+  update(time:number,dt:number,aspect:number,presence:number,pose:PoseTrack,c:RiverConfig){
+    const hands=memoryHands(pose.joints,pose.presence,aspect);
+    const data=this.field.image.data as Float32Array,w=this.field.image.width,h=this.field.image.height;
+    const coverage=(x:number,y:number)=>{
+      if(x<0||x>1||y<0||y>1||presence<.05)return 0;
+      const px=x*(w-1),py=y*(h-1),ix=Math.floor(px),iy=Math.floor(py),fx=px-ix,fy=py-iy;
+      const at=(a:number,b:number)=>data[(Math.min(h-1,b)*w+Math.min(w-1,a))*4+3];
+      return ((at(ix,iy)*(1-fx)+at(ix+1,iy)*fx)*(1-fy)+(at(ix,iy+1)*(1-fx)+at(ix+1,iy+1)*fx)*fy);
+    };
+    this.interaction.update(dt,time,aspect,this.records,hands,coverage,c);this.rebuildGlyphs();
+    const u=this.points.material.uniforms;
+    this.interaction.items.forEach((m,i)=>{u.uAnchors.value[i].set(m.x,m.y,m.group,0);u.uMemoryState.value[i].set(m.formation,m.release,m.emphasis,0);});
+    u.uTime.value=time;u.uAspect.value=aspect;u.uPresence.value=presence;u.uColor.value.set(c.color);u.uAccent.value.set(c.accent);
   }
-  get count(){return this.points.geometry.getAttribute('position').count;}
+  get count(){return this.points.geometry.getAttribute('position')?.count??0;}
   dispose(){riverEvents.removeEventListener('text',this.listener);riverEvents.removeEventListener('memory',this.recordListener);this.points.geometry.dispose();this.points.material.dispose();}
 }
+

@@ -13,7 +13,7 @@ test('艺术阶段 1：自然流场与时间演变', async ({ page }) => {
   expect(first.equals(second)).toBe(false);
   expect(errors).toEqual([]);
 });
-test('艺术阶段 4：记忆聚合与重新散入流束',async({page})=>{
+test('艺术阶段 4：持续记忆漂流与人体共存渲染',async({page})=>{
   test.skip(process.env.RIVER_TEST_PRODUCTION==='1','时间定位仅在开发 QA 模式开放');
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
   await page.goto('/?camera=off&stage=4&qa=1');
@@ -26,7 +26,7 @@ test('艺术阶段 4：记忆聚合与重新散入流束',async({page})=>{
   await page.evaluate(()=>(window as any).__riverQA.seek(24));
   const f2=await page.evaluate(()=>(window as any).__river.frames);
   await expect.poll(()=>page.evaluate(()=>(window as any).__river.frames),{timeout:30000}).toBeGreaterThan(f2+80);
-  const b=await page.screenshot({path:'test-results/art-stage-4-dispersal.png'});expect(a.equals(b)).toBe(false);
+  const b=await page.screenshot({path:'test-results/art-stage-4-flowing.png'});expect(a.equals(b)).toBe(false);
   await page.evaluate(()=>{(window as any).__riverQA.seek(10);(window as any).__riverQA.injectSilhouette(0);});
   await expect.poll(()=>page.evaluate(()=>(window as any).__river.presence)).toBeGreaterThan(.8);
   const f3=await page.evaluate(()=>(window as any).__river.frames);

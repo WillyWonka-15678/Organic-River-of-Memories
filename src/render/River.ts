@@ -26,7 +26,7 @@ export class River {
   private blur=new THREE.ShaderMaterial({vertexShader:fullscreenVertex,fragmentShader:blurFragment,uniforms:{uPrevious:{value:null},uDirection:{value:new THREE.Vector2()}},depthTest:false,depthWrite:false});
   private glow=[0,1].map(()=>new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,depthBuffer:false}));
   private silk: SilkLayers;
-  private memories: MemoryLayer;
+  readonly memories: MemoryLayer;
   private memoryScene=new THREE.Scene();
   private constellation:HumanConstellation;
   private initializing = true;
@@ -106,7 +106,7 @@ export class River {
     this.targets.forEach(t => t.setSize(size.x, size.y)); this.clearTrails();
     this.glow.forEach(t=>t.setSize(Math.max(1,Math.ceil(size.x/4)),Math.max(1,Math.ceil(size.y/4))));
   }
-  update(time: number, dt: number, presence: number, pose:PoseTrack) {
+  update(time: number, dt: number, presence: number, pose:PoseTrack, memoryDt=dt) {
     const c = this.config, u = this.variable.material.uniforms;
     this.colors.update(c,dt,this.wake);
     u.uTime.value = time; u.uDt.value = dt; u.uSpeed.value = c.speed; u.uNoise.value = c.noise;
@@ -129,7 +129,7 @@ export class River {
     this.silk.mesh.visible=c.stage>=3;
     this.silk.update(time,innerWidth/innerHeight,c.breathing,presence*(1-c.riverProtection*.8),c.silk,c.color,c.accent);
     this.memories.points.visible=c.stage>=4&&c.memories;
-    this.memories.update(time,innerWidth/innerHeight,presence,c.color,c.accent);
+    if(c.stage>=4&&c.memories)this.memories.update(time,memoryDt,innerWidth/innerHeight,presence,pose,c);
     p.uSize.value = c.size; p.uColor.value.set(c.color); p.uAccent.value.set(c.accent);
     const next = 1 - this.active;
     this.fade.uniforms.uPrevious.value = this.targets[this.active].texture;

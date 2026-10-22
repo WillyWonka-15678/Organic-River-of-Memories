@@ -33,7 +33,12 @@ export class PoseTrack {
     if(stamp!==this.lastStamp){
       const gap=Math.max(.025,(stamp-this.lastStamp)/1000);
       this.lastStamp=stamp;
-      const valid=points.filter(p=>p.confidence>.5).length>=4&&(points[11]?.confidence??0)>.5&&(points[12]?.confidence??0)>.5;
+      const visible=(i:number)=>(points[i]?.confidence??0)>.5;
+      // An unobscured arm is sufficient near a screen edge or when turned sideways.
+      // Keep confidence per joint: absent shoulders must not fabricate a torso.
+      const torso=visible(11)&&visible(12)&&points.filter(p=>p.confidence>.5).length>=4;
+      const arm=[0,1].some(i=>visible(11+i)&&visible(13+i)&&visible(15+i));
+      const valid=torso||arm;
       if(valid){
         const reacquired=now-this.lastGood>900;
         if(reacquired)this.arrived=now;
