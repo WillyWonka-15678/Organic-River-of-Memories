@@ -1,16 +1,12 @@
+import { paletteGLSL } from './ColorSystem';
+import { wakeGLSL } from './wakeField';
+import { spineGLSL } from '../interaction/riverSpine';
 // Shared flow coordinates will also drive memory typography and silk filaments.
 export const flowFunctions = /* glsl */ `
 float hash(float n){return fract(sin(n*127.1)*43758.5453);}
 float groupFor(float s){return s<.32?0.:s<.58?1.:s<.79?2.:3.;}
 float normalSeed(vec4 s){return clamp(sqrt(-2.*log(max(.001,s.y)))*cos(s.a*6.283),-2.7,2.7);}
-float spine(float x,float g,float t){
-  float y=.5;
-  if(g<.5) y=.49+.19*sin(x*5.8-.7+t*.037)+.046*sin(x*11.2+t*.063);
-  else if(g<1.5) y=.44+.22*sin(x*4.4+2.7-t*.028)+.035*sin(x*9.5-1.+t*.04);
-  else if(g<2.5) y=.59+.16*sin(x*6.5+1.8+t*.024)+.05*sin(x*10.8+t*.052);
-  else y=.30+.16*sin(x*5.1-1.6+t*.031);
-  return y;
-}
+${spineGLSL}
 float streamY(float x,vec4 seed,float t,float breathing){
   float g=groupFor(seed.b),q=normalSeed(seed);
   float swell=.5+.5*sin(x*8.2+g*2.7-t*.055);
@@ -27,8 +23,9 @@ uniform float uTime,uDt,uSpeed,uNoise,uAspect,uBreathing,uInit,uStage,uPresence,
 uniform sampler2D uSeeds,uField;
 uniform vec2 uFieldSize;
 uniform vec4 uWrists[2];
-uniform float uHandForce;
+uniform float uHandForce,uProtection;
 ${flowFunctions}
+${wakeGLSL}
 void main(){
   vec2 uv=gl_FragCoord.xy/resolution.xy;
   vec4 s=texture2D(uSeeds,uv),state=texture2D(texturePosition,uv);
@@ -43,12 +40,13 @@ void main(){
   desired.y=slope*desired.x;
   desired+=ambient(p,uTime)*uNoise*(dust?.025:.007);
   if(dust){desired=vec2(uSpeed*.25,sin(p.x*8.+s.a*9.+uTime*.14)*.005)+ambient(p,uTime)*.003;}
-  else desired.y+=clamp((target-p.y)*.85,-.11,.11);
+  else desired.y+=clamp((target-p.y)*.85,-.11,.11)*(1.-wakeField(p,uAspect).z*.95);
   // Small local eddies are off-centre and slowly migrate with the river.
   vec2 centre=vec2(.63+.08*sin(uTime*.031),.47+.08*cos(uTime*.043));
   vec2 r=(p-centre)*vec2(uAspect,1.);
   float vortex=exp(-dot(r,r)/.038)*(dust?.12:.025)*uNoise;
   desired+=vec2(-r.y,r.x)*vortex*7.;
+  vec2 baseVelocity=desired;
   if(uStage>=2.&&uPresence>.001){
     vec2 stepUV=1./uFieldSize;
     float d=texture2D(uField,clamp(p,0.,1.)).r;
@@ -58,16 +56,9 @@ void main(){
     grad/=vec2(stepUV.x*uAspect,stepUV.y);
     vec2 n=grad/max(.0001,length(grad));
     float near=exp(-max(d,0.)/uRadius)*uPresence;
-    vec2 tangent=vec2(-n.y,n.x);
-    tangent*=dot(tangent,desired)<0.?-1.:1.;
-    vec2 along=tangent*max(length(desired),uSpeed*.7)+n*(.018+max(-d,0.)*.35);
-    desired=mix(desired,along,clamp(near*uRepulsion*.85,0.,.94));
-    vec2 motion=texture2D(uField,clamp(p,0.,1.)).gb;
-    float moving=length(motion);
-    desired+=(motion*.28+tangent*moving*.36)*near;
-    // A subset circulates near the true contour while a stationary viewer remains.
-    float halo=exp(-abs(d-.026)/.027)*uPresence;
-    desired+=(-n*(d-.026)*.8+tangent*.018)*halo*step(.55,s.a);
+    // Remove only the inward component: no tangent sign flips or mask-motion kicks.
+    vec2 along=desired-n*min(dot(n,desired),0.)*.85+n*min(.025,.008+max(-d,0.)*.12);
+    desired=mix(desired,along,clamp(near*uRepulsion*.65,0.,.70));
   }
   // Local hand attractors share the exact tracked screen coordinates with the stars.
   for(int hand=0;hand<2;hand++){
@@ -76,7 +67,13 @@ void main(){
     float direction=hand==0?1.:-1.;
     desired+=(-r*.35+vec2(-r.y,r.x)*direction*(.5+wrist.w))*influence;
   }
-  vec2 v=mix(state.zw,desired,1.-exp(-uDt*2.2));
+  // Mask and wrists share a small budget; detached wake acts on actual river velocity.
+  vec2 extra=desired-baseVelocity;
+  float budget=mix(.075,.018,clamp(uProtection,0.,1.));
+  desired=baseVelocity+extra*min(1.,budget/max(length(extra),.0001));
+  vec3 wake=wakeField(p,uAspect);
+  desired=desired*(1.-wake.z*.5)+wake.xy*mix(1.,.85,uProtection);
+  vec2 v=mix(state.zw,desired,1.-exp(-uDt*mix(2.2,5.,wake.z)));
   p+=v*uDt/vec2(uAspect,1.);
   float life=24.+s.a*30.;
   bool reborn=floor((uTime+s.x*life)/life)!=floor((uTime-uDt+s.x*life)/life);
@@ -91,10 +88,12 @@ void main(){
 export const particleVertex = /* glsl */ `
 uniform sampler2D uPositions,uSeeds,uField;
 uniform float uSize,uPixelRatio,uTime,uStage,uPresence;
+varying vec2 vPalettePosition;varying float vPaletteGroup;
 attribute vec2 reference;
 varying float vSeed,vAlpha,vWarm,vWhite,vShape;
 void main(){
   vec4 p=texture2D(uPositions,reference),s=texture2D(uSeeds,reference);
+  vPalettePosition=p.xy;vPaletteGroup=s.b<.32?0.:s.b<.58?1.:s.b<.79?2.:3.;
   vSeed=s.a;
   float life=24.+s.a*30.;
   float age=fract((uTime+s.x*life)/life);
@@ -116,7 +115,9 @@ void main(){
   gl_PointSize+=vShape*uPixelRatio*(1.5+s.a*2.);
 }`;
 export const particleFragment = /* glsl */ `
-uniform vec3 uColor,uAccent;
+uniform vec3 uColor,uAccent;uniform float uColorAspect;
+varying vec2 vPalettePosition;varying float vPaletteGroup;
+${paletteGLSL}
 varying float vSeed,vAlpha,vWarm,vWhite,vShape;
 void main(){
   vec2 p=(gl_PointCoord-.5)*2.;float r=length(p);
@@ -125,6 +126,8 @@ void main(){
   float shard=exp(-(abs(p.x)*1.8+abs(p.y)*.8)*4.);
   core=mix(core,shard,vShape);
   vec3 c=mix(uColor,uAccent,vWarm);c=mix(c,vec3(.83,1.,.97),vWhite);
+  float eligible=(vPaletteGroup>.5&&vPaletteGroup<2.5)?.85:.04;
+  c=riverPalette(c,vPalettePosition,uColorAspect,eligible,vWarm,vWhite,step(.94,vSeed));
   gl_FragColor=vec4(c,core*vAlpha);
 }`;
 export const fullscreenVertex = `varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}`;

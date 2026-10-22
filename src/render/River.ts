@@ -1,3 +1,5 @@
+import { ColorSystem, type PaletteName } from './ColorSystem';
+import { wakeUniforms, updateWakeUniforms } from './wakeField';
 import * as THREE from 'three';
 import { GPUComputationRenderer } from 'three/addons/misc/GPUComputationRenderer.js';
 import type { RiverConfig } from '../config';
@@ -6,6 +8,8 @@ import { SilkLayers } from './SilkLayers';
 import { MemoryLayer } from '../memories/MemoryLayer';
 import { HumanConstellation } from './HumanConstellation';
 import type { PoseTrack } from '../interaction/PoseTrack';
+import { BodyWake } from '../interaction/BodyWake';
+import { WakeLayer } from './WakeLayer';
 
 export class River {
   renderer: THREE.WebGLRenderer;
@@ -29,6 +33,9 @@ export class River {
   private targets: THREE.WebGLRenderTarget[];
   private active = 0;
   actualCount = 0;
+  readonly colors=new ColorSystem();
+  readonly wake=new BodyWake();
+  private wakeLayer:WakeLayer;
   constructor(canvas: HTMLCanvasElement, private config: RiverConfig, private field: THREE.DataTexture) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
     if (!this.renderer.extensions.has('EXT_color_buffer_float')) throw new Error('此设备无法使用浮点 GPU 粒子计算，请开启浏览器硬件加速并更新显卡驱动。');
@@ -37,12 +44,16 @@ export class River {
     }
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
     this.renderer.autoClear = false;
+    this.wakeLayer=new WakeLayer(this.renderer.getPixelRatio());
     this.targets = [0,1].map(() => new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false }));
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.fade);
     this.quadScene.add(this.quad);
     this.silk=new SilkLayers(field);this.scene.add(this.silk.mesh);
     this.memories=new MemoryLayer(field,this.renderer.getPixelRatio());this.memoryScene.add(this.memories.points);
     this.constellation=new HumanConstellation(this.renderer.getPixelRatio(),field);
+    Object.assign(this.silk.mesh.material.uniforms,this.colors.uniforms);
+    Object.assign(this.memories.points.material.uniforms,this.colors.uniforms);
+    this.wakeLayer.setColorUniforms(this.colors.uniforms);
     this.rebuild(config.count);
     this.resize();
   }
@@ -69,6 +80,7 @@ export class River {
       uStage: { value: 1 }, uPresence: { value: 0 }, uRepulsion: { value: 0 }, uRadius: { value: .13 },
       uFieldSize: { value: new THREE.Vector2(this.field.image.width,this.field.image.height) },
       uWrists:{value:[new THREE.Vector4(),new THREE.Vector4()]},uHandForce:{value:0},
+      uProtection:{value:1},...wakeUniforms(),
     });
     const error = this.compute.init();
     if (error) throw new Error(error);
@@ -78,7 +90,7 @@ export class River {
     for (let i = 0; i < count; i++) { refs[i * 2] = ((i % side) + .5) / side; refs[i * 2 + 1] = (Math.floor(i / side) + .5) / side; }
     geometry.setAttribute('reference', new THREE.BufferAttribute(refs, 2));
     const material = new THREE.ShaderMaterial({ vertexShader: particleVertex, fragmentShader: particleFragment,
-      uniforms: { uPositions: { value: null }, uSeeds: { value: initial }, uField:{value:this.field},uStage:{value:1},uPresence:{value:0},uTime: { value: 0 }, uSize: { value: 2 }, uPixelRatio: { value: this.renderer.getPixelRatio() }, uColor: { value: new THREE.Color() }, uAccent: { value: new THREE.Color() } },
+      uniforms: { ...this.colors.uniforms,uColorAspect:{value:1},uPositions: { value: null }, uSeeds: { value: initial }, uField:{value:this.field},uStage:{value:1},uPresence:{value:0},uTime: { value: 0 }, uSize: { value: 2 }, uPixelRatio: { value: this.renderer.getPixelRatio() }, uColor: { value: new THREE.Color() }, uAccent: { value: new THREE.Color() } },
       transparent: true, blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false });
     this.points = new THREE.Points(geometry, material); this.points.frustumCulled = false; this.scene.add(this.points);
     this.initializing = true;
@@ -96,21 +108,26 @@ export class River {
   }
   update(time: number, dt: number, presence: number, pose:PoseTrack) {
     const c = this.config, u = this.variable.material.uniforms;
+    this.colors.update(c,dt,this.wake);
     u.uTime.value = time; u.uDt.value = dt; u.uSpeed.value = c.speed; u.uNoise.value = c.noise;
     u.uBreathing.value = c.breathing; u.uInit.value = this.initializing ? 1 : 0;
     u.uAspect.value = innerWidth / innerHeight;
     u.uStage.value = c.stage; u.uPresence.value = presence; u.uRepulsion.value = c.repulsion; u.uRadius.value = c.radius;
     u.uHandForce.value=c.constellation&&c.stage>=2?c.wristAttraction:0;
+    u.uProtection.value=c.riverProtection;
     for(let i=0;i<2;i++){const hand=pose.wrist(i as 0|1);u.uWrists.value[i].set(hand.x,hand.y,hand.strength,hand.activity);}
     this.constellation.update(pose,time,dt,innerWidth/innerHeight,c,presence);
-    this.compute.compute();
+    updateWakeUniforms(u as unknown as ReturnType<typeof wakeUniforms>,this.wake);
+    updateWakeUniforms(this.silk.mesh.material.uniforms as unknown as ReturnType<typeof wakeUniforms>,this.wake);
+    if(dt>0||this.initializing)this.compute.compute();
     this.initializing = false;
     const p = this.points.material.uniforms;
     p.uPositions.value = this.compute.getCurrentRenderTarget(this.variable).texture;
+    p.uColorAspect.value=innerWidth/innerHeight;
     p.uTime.value = time;
     p.uStage.value=c.stage;p.uPresence.value=presence;
     this.silk.mesh.visible=c.stage>=3;
-    this.silk.update(time,innerWidth/innerHeight,c.breathing,presence,c.silk,c.color,c.accent);
+    this.silk.update(time,innerWidth/innerHeight,c.breathing,presence*(1-c.riverProtection*.8),c.silk,c.color,c.accent);
     this.memories.points.visible=c.stage>=4&&c.memories;
     this.memories.update(time,innerWidth/innerHeight,presence,c.color,c.accent);
     p.uSize.value = c.size; p.uColor.value.set(c.color); p.uAccent.value.set(c.accent);
@@ -132,14 +149,27 @@ export class River {
     this.renderer.setRenderTarget(null);
     this.display.uniforms.uPrevious.value = this.targets[next].texture;
     this.display.uniforms.uExposure.value = c.exposure;
-    this.display.uniforms.uGlow.value=this.glow[0].texture;this.display.uniforms.uBloom.value=c.stage>=3?.28:0;
+    this.display.uniforms.uGlow.value=this.glow[0].texture;this.display.uniforms.uBloom.value=c.stage>=3?this.colors.bloom:0;
     this.quad.material = this.display;
-    this.renderer.render(this.quadScene, this.camera);
+    const wakeOnly=c.wakeEnabled&&c.wakeMode==='only';
+    if(wakeOnly)this.renderer.clear();else this.renderer.render(this.quadScene, this.camera);
+    this.wakeLayer.update(this.wake,innerWidth/innerHeight,c,dt,time);
+    if(c.wakeEnabled&&c.wakeMode!=='off')this.renderer.render(this.wakeLayer.scene,this.camera);
     // Typography is composed freshly in the same WebGL coordinates: its own
     // gather/scatter motion supplies persistence without smearing readable glyphs.
-    if(c.stage>=4&&c.memories)this.renderer.render(this.memoryScene,this.camera);
-    if(c.constellation&&c.stage>=2)this.renderer.render(this.constellation.scene,this.camera);
+    if(!wakeOnly&&c.stage>=4&&c.memories)this.renderer.render(this.memoryScene,this.camera);
+    if(!wakeOnly&&c.constellation&&c.stage>=2)this.renderer.render(this.constellation.scene,this.camera);
     this.active = next;
+  }
+  particleStudyState(){
+    const values=new Float32Array(16*4);
+    this.renderer.readRenderTargetPixels(this.compute.getCurrentRenderTarget(this.variable),0,0,16,1,values);
+    return Array.from(values);
+  }
+  // Development-only caller freezes input before comparing the same GPU state.
+  renderPaletteStudy(preset:PaletteName,time:number,presence:number,pose:PoseTrack){
+    this.config.palette=preset;this.colors.update(this.config,0,this.wake,true);this.clearTrails();
+    for(let i=0;i<20;i++)this.update(time,0,presence,pose);
   }
   dispose() {
     this.compute.dispose(); this.points.geometry.dispose(); this.points.material.dispose();
@@ -147,5 +177,6 @@ export class River {
     this.glow.forEach(t=>t.dispose());this.blur.dispose();this.highlight.dispose();this.silk.dispose();
     this.memories.dispose();
     this.constellation.dispose();
+    this.wakeLayer.dispose();
   }
 }

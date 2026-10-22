@@ -3,7 +3,7 @@ test('GPU 渲染、调试面板、粒子重建与窗口变化', async ({ page })
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
-  await page.goto('/');
+  await page.goto('/?camera=off');
   await expect.poll(() => page.evaluate(() => (window as any).__river?.frames ?? 0), { timeout: 45000 }).toBeGreaterThan(10);
   await expect(page.locator('#metrics')).toContainText('65,536');
   // Read actual framebuffer pixels; a running animation counter alone cannot prove rendering.
@@ -46,7 +46,6 @@ test('摄像头拒绝后保留可运行的演示并提供重试', async ({ page,
 });
 test('真实 MediaPipe Worker 用模拟摄像头完成推理且能关闭恢复', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: '开启摄像头' }).click();
   await expect.poll(async () => {
     const text = await page.locator('#status').textContent();
     if (text?.includes('摄像头不可用')) throw new Error(text);

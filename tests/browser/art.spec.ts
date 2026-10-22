@@ -3,7 +3,7 @@ test('艺术阶段 1：自然流场与时间演变', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
-  await page.goto('/?stage=1&qa=1');
+  await page.goto('/?camera=off&stage=1&qa=1');
   await expect.poll(() => page.evaluate(() => (window as any).__river?.frames ?? 0), { timeout: 45000 }).toBeGreaterThan(100);
   await page.keyboard.press('h');
   const first = await page.screenshot({ path: 'test-results/art-stage-1-a.png' });
@@ -16,7 +16,7 @@ test('艺术阶段 1：自然流场与时间演变', async ({ page }) => {
 test('艺术阶段 4：记忆聚合与重新散入流束',async({page})=>{
   test.skip(process.env.RIVER_TEST_PRODUCTION==='1','时间定位仅在开发 QA 模式开放');
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
-  await page.goto('/?stage=4&qa=1');
+  await page.goto('/?camera=off&stage=4&qa=1');
   await expect.poll(()=>page.evaluate(()=>(window as any).__river?.frames??0)).toBeGreaterThan(10);
   await page.evaluate(()=>(window as any).__riverQA.seek(8));
   const f=await page.evaluate(()=>(window as any).__river.frames);
@@ -37,7 +37,7 @@ test('艺术阶段 4：记忆聚合与重新散入流束',async({page})=>{
 test('艺术阶段 3：丝绸叠层、局部高光与光尘',async({page})=>{
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
   page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
-  await page.goto('/?stage=3');
+  await page.goto('/?camera=off&stage=3');
   await expect.poll(()=>page.evaluate(()=>(window as any).__river?.frames??0),{timeout:45000}).toBeGreaterThan(100);
   await page.keyboard.press('h');await page.screenshot({path:'test-results/art-stage-3-silk.png'});
   expect(errors).toEqual([]);
@@ -47,7 +47,7 @@ test('艺术阶段 2：实际轮廓采样、移动与缓慢恢复', async ({ pag
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
-  await page.goto('/?stage=2&qa=1');
+  await page.goto('/?camera=off&stage=2&qa=1');
   await expect.poll(() => page.evaluate(() => (window as any).__river?.frames ?? 0)).toBeGreaterThan(10);
   await page.evaluate(() => (window as any).__riverQA.injectSilhouette(0));
   await expect.poll(() => page.evaluate(() => (window as any).__river.presence)).toBeGreaterThan(.8);

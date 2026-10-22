@@ -55,7 +55,7 @@ export class BodyInput {
         if (data.type === 'mask') {
           this.pending = false;
           this.poseReady = data.poseReady;
-          if(data.landmarks!==undefined)this.acceptPose(data.landmarks);
+          if(data.landmarks!==undefined)this.acceptPose(data.landmarks,data.timestamp);
           const raw: Uint8Array = data.mask;
           // Resample model output to the fixed screen-space field grid.
           const mask = new Uint8Array(this.width * this.height);
@@ -97,9 +97,9 @@ export class BodyInput {
     }).catch(error => this.fail(String(error)));
   }
   private fail(message: string) { this.stop(); this.status(`摄像头不可用：${message}；可继续使用演示模式。`); }
-  acceptPose(landmarks: CameraLandmark[]) {
+  acceptPose(landmarks: CameraLandmark[],timestamp=performance.now()) {
     // Camera pixels were mirrored/cropped before inference. Only invert y here.
-    this.pose=mapPose(landmarks);this.lastPoseTime=performance.now();
+    this.pose=mapPose(landmarks);this.lastPoseTime=timestamp;
   }
   acceptMask(mask: Uint8Array, timestamp: number) {
     let count = 0, cx = 0, cy = 0;

@@ -2,7 +2,7 @@ import {test,expect} from '@playwright/test';
 test('人体星座：姿态映射、手腕流场、静止消散与 Mask 共存',async({page})=>{
   test.skip(process.env.RIVER_TEST_PRODUCTION==='1','合成关键点仅在开发 QA 模式开放');
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
-  await page.goto('/?qa=1');
+  await page.goto('/?qa=1&camera=off');
   await expect.poll(()=>page.evaluate(()=>(window as any).__river?.frames??0)).toBeGreaterThan(10);
   await page.evaluate(()=>{
     const win=window as any;win.__poseStudy={moving:true,phase:0,occluded:false};
@@ -50,7 +50,7 @@ test('人体星座：姿态映射、手腕流场、静止消散与 Mask 共存',
 });
 test('姿态模型加载失败时，Mask 与摄像头仍可继续运行',async({page,context})=>{
   await context.route('**/models/pose_landmarker_lite.task',route=>route.abort());
-  await page.goto('/');await page.getByRole('button',{name:'开启摄像头'}).click();
+  await page.goto('/');
   await expect(page.locator('#status')).toContainText('轮廓互动仍在运行',{timeout:45000});
   expect(await page.evaluate(()=>(window as any).__river.camera)).toBe(true);
   expect(await page.evaluate(()=>(window as any).__river.poseReady)).toBe(false);

@@ -1,3 +1,4 @@
+import { paletteGLSL } from '../render/ColorSystem';
 import * as THREE from 'three';
 import { flowFunctions } from '../render/organicShaders';
 import { riverEvents } from '../integrations/events';
@@ -9,7 +10,7 @@ uniform sampler2D uField;
 attribute vec2 glyph;
 attribute vec4 memorySeed;
 attribute float memoryIndex;
-varying float vAlpha,vWarm;
+varying float vAlpha,vWarm;varying vec2 vPalettePosition;
 ${flowFunctions}
 void main(){
   vec4 s=memorySeed;
@@ -33,14 +34,16 @@ void main(){
   p=mix(p,source,feeling*.22);
   p+=n*.018*feeling/vec2(uAspect,1.);
   vAlpha=visible*(.025+.85*gather)*(.8+s.a*.2);
-  vWarm=.55+.45*s.y;
+  vWarm=.55+.45*s.y;vPalettePosition=p;
   gl_Position=vec4(p*2.-1.,0.,1.);
   gl_PointSize=uPixelRatio*(1.+gather*1.7);
 }`;
 const fragment=/* glsl */`
-uniform vec3 uColor,uAccent;varying float vAlpha,vWarm;
+${paletteGLSL}
+uniform float uAspect;uniform vec3 uColor,uAccent;varying float vAlpha,vWarm;varying vec2 vPalettePosition;
 void main(){float r=length((gl_PointCoord-.5)*2.);if(r>1.)discard;
 vec3 color=mix(uColor,uAccent,vWarm);color=mix(color,vec3(.91,.93,.81),.17);
+color=riverPalette(color,vPalettePosition,uAspect,0.,vWarm,0.,0.);
 gl_FragColor=vec4(1.-exp(-color*1.35),exp(-r*r*2.)*vAlpha);
 #include <colorspace_fragment>
 }`;

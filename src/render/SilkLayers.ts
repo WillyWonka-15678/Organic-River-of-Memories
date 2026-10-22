@@ -1,3 +1,5 @@
+import { paletteGLSL } from './ColorSystem';
+import { wakeGLSL, wakeUniforms } from './wakeField';
 import * as THREE from 'three';
 import { flowFunctions } from './organicShaders';
 
@@ -5,7 +7,9 @@ const vertex = /* glsl */ `
 uniform float uTime,uAspect,uBreathing,uPresence;
 uniform sampler2D uField;
 varying float vQ,vGroup,vX,vLayer;
+varying vec2 vPalettePosition;
 ${flowFunctions}
+${wakeGLSL}
 void main(){
   float x=position.x,q=position.y,g=floor(position.z),layer=fract(position.z)*4.;
   float swell=.5+.5*sin(x*8.2+g*2.7-uTime*.055);
@@ -20,14 +24,22 @@ void main(){
   // Thin membranes feel the boundary rather than being projected onto it.
   // Projection of an entire sheet produces sharp folds at the mask's medial axis.
   float feeling=exp(-abs(d)/.055)*uPresence;
-  p+=(n*.018+texture2D(uField,clamp(p,0.,1.)).gb*.025)*feeling/vec2(uAspect,1.);
-  vQ=q;vGroup=g;vX=x;vLayer=layer;
+  p+=n*.018*feeling/vec2(uAspect,1.);
+  // Short local material transport: bounded deformation of the existing silk sheet.
+  // No radial placement: each vertex follows the same tangential field as river dust.
+  vec2 original=p;
+  for(int k=0;k<8;k++)p+=wakeField(p,uAspect).xy*.22/vec2(uAspect,1.);
+  vec2 delta=(p-original)*vec2(uAspect,1.);
+  p=original+delta/sqrt(1.+dot(delta,delta)/.0064)/vec2(uAspect,1.);
+  vPalettePosition=p;vQ=q;vGroup=g;vX=x;vLayer=layer;
   gl_Position=vec4(p*2.-1.,0.,1.);
 }`;
 const fragment = /* glsl */ `
-uniform float uTime,uSilk;
+uniform float uTime,uSilk,uAspect;
+${paletteGLSL}
 uniform vec3 uColor,uAccent;
 varying float vQ,vGroup,vX,vLayer;
+varying vec2 vPalettePosition;
 void main(){
   float edge=pow(max(0.,1.-vQ*vQ),1.4);
   float threads=pow(.5+.5*sin(vQ*75.+sin(vX*10.+vGroup)*4.+uTime*.09),18.);
@@ -38,6 +50,8 @@ void main(){
   warm=max(warm,step(.5,vLayer)*step(vGroup,.5)*smoothstep(.25,.85,vX)*.45);
   vec3 c=mix(uColor,uAccent,warm);
   c=mix(c,vec3(.65,.89,.85),crease*.20);
+  float eligible=(vGroup>.5&&vGroup<2.5)?(.65+.2*vLayer):.025;
+  c=riverPalette(c,vPalettePosition,uAspect,eligible,warm,crease*.12,crease*step(.8,threads));
   gl_FragColor=vec4(c,alpha);
 }`;
 export class SilkLayers {
@@ -54,7 +68,7 @@ export class SilkLayers {
     }
     const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));geometry.setIndex(indices);
     const material=new THREE.ShaderMaterial({vertexShader:vertex,fragmentShader:fragment,
-      uniforms:{uTime:{value:0},uAspect:{value:1},uBreathing:{value:1},uPresence:{value:0},uField:{value:field},uSilk:{value:.65},uColor:{value:new THREE.Color()},uAccent:{value:new THREE.Color()}},
+      uniforms:{...wakeUniforms(),uTime:{value:0},uAspect:{value:1},uBreathing:{value:1},uPresence:{value:0},uField:{value:field},uSilk:{value:.65},uColor:{value:new THREE.Color()},uAccent:{value:new THREE.Color()}},
       transparent:true,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,depthTest:false,depthWrite:false});
     this.mesh=new THREE.Mesh(geometry,material);this.mesh.frustumCulled=false;this.mesh.renderOrder=-1;
   }

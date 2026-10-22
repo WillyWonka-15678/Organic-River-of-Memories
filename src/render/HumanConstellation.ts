@@ -99,7 +99,9 @@ export class HumanConstellation {
     this.previousTime=time;this.count=0;
     const sample=time-this.lastHistory>1/24;
     if(sample)this.lastHistory=time;
-    const form=track.formation;
+    // Keep a quiet, readable constellation while a person is still being tracked.
+    // Presence fades after tracking is lost, so this floor does not leave a ghost body.
+    const form=Math.max(track.formation,track.presence*.30);
     this.bodyField.update(time,aspect,maskPresence,form,config);
     STAR_NODES.forEach((index,k)=>{
       const j=track.joints[index],gold=index===15||index===24;
