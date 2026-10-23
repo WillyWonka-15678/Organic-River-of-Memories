@@ -1,0 +1,10 @@
+{
+  "NETWORK_MODE": "lan",
+  "LAN_INTERFACE": "WLAN",
+  "SHOW_QR": true,
+  "EXHIBITION_MODE": true,
+  "PORT": 3000,
+  "BACKUP_DIR": "backups",
+  "BACKUP_INTERVAL_MINUTES": 60,
+  "BACKUP_RETENTION_DAYS": 14
+}

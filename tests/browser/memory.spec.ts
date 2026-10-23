@@ -2,9 +2,10 @@ import {test,expect} from '@playwright/test';
 test('startup immediately populates the screen with drifting memories',async({page})=>{
  test.skip(process.env.RIVER_TEST_PRODUCTION==='1','Dev state inspection');
  await page.goto('/?camera=off&stage=4&qa=1');
- await expect.poll(()=>page.evaluate(()=>(window as any).__riverQA?.memoryState().length??0)).toBe(5);
+ await expect.poll(()=>page.evaluate(()=>(window as any).__riverQA?.memoryState().length??0)).toBe(36);
  const initial=await page.evaluate(()=>(window as any).__riverQA.memoryState());
- expect(initial.every((m:any)=>m.x>0&&m.x<1&&m.formation===1&&m.state==='FLOWING')).toBe(true);
+ expect(initial.every((m:any)=>m.x>=-.24&&m.x<1.3&&m.formation===1&&m.state==='FLOWING')).toBe(true);
+ expect(initial.filter((m:any)=>m.x>=0&&m.x<=1).length).toBeGreaterThanOrEqual(22);
  expect(Math.max(...initial.map((m:any)=>m.x))-Math.min(...initial.map((m:any)=>m.x))).toBeGreaterThan(.5);
  await page.screenshot({path:'test-results/memory-startup.png'});
  await expect.poll(()=>page.evaluate(id=>(window as any).__riverQA.memoryState().find((m:any)=>m.id===id)?.x,initial[0].id)).toBeGreaterThan(initial[0].x+.01);

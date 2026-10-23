@@ -4,13 +4,14 @@ import type { RiverConfig } from '../config';
 import { paletteGLSL } from '../render/ColorSystem';
 import * as THREE from 'three';
 import { flowFunctions } from '../render/organicShaders';
-import { riverEvents } from '../integrations/events';
-import { studyMemories, type MemoryRecord } from './MemoryRecord';
+import type { MemoryRecord } from './MemoryRecord';
+import { MemoryPool } from './MemoryPool';
+import { MAX_MEMORY_INSTANCES } from './limits';
 
 const vertex=/* glsl */`
 uniform float uTime,uAspect,uPresence,uPixelRatio;
 uniform sampler2D uField;
-uniform vec4 uAnchors[8],uMemoryState[8];
+uniform vec4 uAnchors[${MAX_MEMORY_INSTANCES}],uMemoryState[${MAX_MEMORY_INSTANCES}];
 attribute vec2 glyph;
 attribute vec4 memorySeed;
 attribute float memoryIndex;
@@ -31,7 +32,7 @@ void main(){
   p+=vec2(travel*(.10+s.x*.14)/uAspect,travel*(slope*.035+(s.y-.5)*.07));
   p+=release*vec2(sin(s.a*6.283+state.y*2.),cos(s.a*6.283+state.y*1.3))*.012;
   float visible=smoothstep(-.36,-.08,anchor.x)*(1.-smoothstep(1.05,1.30,anchor.x));
-  vAlpha=visible*(.12+.73*gather)*(.8+s.a*.2)*(1.-smoothstep(.55,1.,state.y))*(1.+focus*.15);
+  vAlpha=anchor.w*visible*(.12+.73*gather)*(.8+s.a*.2)*(1.-smoothstep(.55,1.,state.y))*(1.+focus*.15);
   vAlpha*=glyphDetail.y;
   vFocus=focus*(1.-release)*mix(1.,.35,glyphDetail.x);vSpread=1.+2.*vFocus;
   vWarm=.55+.45*s.y;vPalettePosition=p;
@@ -57,23 +58,17 @@ export class MemoryLayer {
   readonly interaction=new MemoryInteraction();
   private signature='';
   private glyphCache=new Map<string,number[]>();
-  private records=[...studyMemories];
-  private listener=(event:Event)=>{
-    const detail=(event as CustomEvent<{id:string;text:string}>).detail;
-    this.setRecords([...this.records.filter(r=>r.id!==detail.id),{id:detail.id,message:detail.text}].slice(-6));
-  };
-  private recordListener=(event:Event)=>{
-    const record=(event as CustomEvent<MemoryRecord>).detail;
-    this.setRecords([...this.records.filter(r=>r.id!==record.id),record].slice(-6));
-  };
+  private records:MemoryRecord[]=[];
+  readonly pool=new MemoryPool((records,removed)=>{this.setRecords(records);for(const id of removed)this.interaction.removeRecord(id);});
   constructor(private field:THREE.DataTexture,pixelRatio:number){
     const material=new THREE.ShaderMaterial({vertexShader:vertex,fragmentShader:fragment,
-      uniforms:{uAnchors:{value:Array.from({length:8},()=>new THREE.Vector4())},uMemoryState:{value:Array.from({length:8},()=>new THREE.Vector4())},uTime:{value:0},uAspect:{value:1},uPresence:{value:0},uPixelRatio:{value:pixelRatio},uField:{value:field},uColor:{value:new THREE.Color()},uAccent:{value:new THREE.Color()}},
+      uniforms:{uAnchors:{value:Array.from({length:MAX_MEMORY_INSTANCES},()=>new THREE.Vector4())},uMemoryState:{value:Array.from({length:MAX_MEMORY_INSTANCES},()=>new THREE.Vector4())},uTime:{value:0},uAspect:{value:1},uPresence:{value:0},uPixelRatio:{value:pixelRatio},uField:{value:field},uColor:{value:new THREE.Color()},uAccent:{value:new THREE.Color()}},
       transparent:true,blending:THREE.AdditiveBlending,depthTest:false,depthWrite:false});
     this.points=new THREE.Points(new THREE.BufferGeometry(),material);this.points.frustumCulled=false;this.points.renderOrder=2;
-    this.setRecords(this.records);riverEvents.addEventListener('text',this.listener);riverEvents.addEventListener('memory',this.recordListener);
+    this.interaction.nextPriority=()=>this.pool.take();
+    this.interaction.priorityWaiting=()=>this.pool.queue.length>0;
   }
-  setRecords(records:MemoryRecord[]){this.records=records.filter(r=>typeof r.message==='string'&&r.message.trim()).slice(0,64);}
+  setRecords(records:MemoryRecord[]){this.records=records.filter(r=>typeof r.message==='string'&&r.message.trim());}
   private rebuildGlyphs(){
     const items=this.interaction.items,signature=items.map(m=>m.id).join(',');
     if(signature===this.signature)return;this.signature=signature;
@@ -121,10 +116,10 @@ export class MemoryLayer {
     };
     this.interaction.update(dt,time,aspect,this.records,hands,coverage,c);this.rebuildGlyphs();
     const u=this.points.material.uniforms;
-    this.interaction.items.forEach((m,i)=>{u.uAnchors.value[i].set(m.x,m.y,m.group,0);u.uMemoryState.value[i].set(m.formation,m.release,m.emphasis,0);});
+    this.interaction.items.forEach((m,i)=>{u.uAnchors.value[i].set(m.x,m.y,m.group,m.opacity);u.uMemoryState.value[i].set(m.formation,m.release,m.emphasis,0);});
     u.uTime.value=time;u.uAspect.value=aspect;u.uPresence.value=presence;u.uColor.value.set(c.color);u.uAccent.value.set(c.accent);
   }
   get count(){return this.points.geometry.getAttribute('position')?.count??0;}
-  dispose(){riverEvents.removeEventListener('text',this.listener);riverEvents.removeEventListener('memory',this.recordListener);this.points.geometry.dispose();this.points.material.dispose();}
+  dispose(){this.points.geometry.dispose();this.points.material.dispose();}
 }
 

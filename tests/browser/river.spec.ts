@@ -39,7 +39,7 @@ test('摄像头拒绝后保留可运行的演示并提供重试', async ({ page,
   await context.clearPermissions();
   await page.addInitScript(() => { navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('Permission denied', 'NotAllowedError'); }; });
   await page.goto('/');
-  await page.getByRole('button', { name: '开启摄像头' }).click();
+  await page.getByRole('button', { name: '开启摄像头 C' }).click();
   await expect(page.locator('#status')).toContainText('摄像头不可用', { timeout: 15000 });
   await expect(page.locator('#camera')).toBeEnabled();
   await expect.poll(() => page.evaluate(() => (window as any).__river?.frames ?? 0)).toBeGreaterThan(10);
@@ -55,6 +55,6 @@ test('真实 MediaPipe Worker 用模拟摄像头完成推理且能关闭恢复',
   await expect.poll(()=>page.evaluate(()=>(window as any).__river.lastPoseTime)).toBeGreaterThan(0);
   const first = await page.evaluate(() => (window as any).__river.lastMaskTime);
   await expect.poll(() => page.evaluate(() => (window as any).__river.lastMaskTime), { timeout: 15000 }).toBeGreaterThan(first);
-  await page.getByRole('button', { name: '关闭摄像头' }).click();
+  await page.getByRole('button', { name: '关闭摄像头 C' }).click();
   await expect.poll(() => page.evaluate(() => (window as any).__river.camera)).toBe(false);
 });

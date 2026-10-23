@@ -4,9 +4,15 @@
 <body>
   <canvas id="river" aria-label="流动的发光粒子河流"></canvas>
   <header id="intro"><h1>时光弹幕河<span>ORGANIC RIVER OF MEMORIES</span></h1></header>
-  <aside id="controls"><button id="camera">开启摄像头</button><button id="fullscreen">全屏 ↗</button><button id="debug" aria-label="创作参数">参数</button><span id="status" role="status">走入河流，让记忆感知你的存在。</span></aside>
+  <section id="gesture-guide" aria-label="观众互动提示">
+    <p><strong>伸手停留</strong><span>拾起一段记忆</span></p>
+    <span class="gesture-divider" aria-hidden="true"></span>
+    <p><strong>拾忆后挥手</strong><span>将记忆送回河流</span></p>
+  </section>
+  <aside id="controls"><button id="camera" aria-keyshortcuts="C" title="快捷键 C：开启或关闭摄像头">开启摄像头 C</button><button id="fullscreen" aria-keyshortcuts="F" title="快捷键 F：切换全屏">全屏 F</button><button id="debug" aria-label="创作参数，快捷键 D" aria-keyshortcuts="D" title="快捷键 D：显示或隐藏参数">参数 D</button><span id="status" role="status">走入河流，让记忆感知你的存在。</span></aside>
   <footer id="caption"><span>远处是光 · 近处是回忆</span><span id="metrics">正在初始化…</span></footer>
   <video id="video" autoplay playsinline muted hidden></video>
   <canvas id="mask-preview" hidden></canvas>
+  <script src="/display-config.js"></script>
   <script type="module" src="/src/main.ts"></script>
 </body></html>

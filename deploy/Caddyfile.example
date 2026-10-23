@@ -1,0 +1,5 @@
+# Future public API host only. Set PUBLIC_HOST to your actual DNS name.
+# Do not run until DNS, persistent storage and HTTPS deployment are prepared.
+{$PUBLIC_HOST} {
+    reverse_proxy 127.0.0.1:3000
+}

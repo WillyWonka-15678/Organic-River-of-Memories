@@ -1,4 +1,5 @@
 import type { MemoryRecord } from './MemoryRecord';
+import { MAX_MEMORY_INSTANCES } from './limits';
 import { riverSpine } from '../interaction/riverSpine';
 export type MemoryState='FLOWING'|'BODY_SLOWED'|'CAPTURED'|'RELEASING';
 export interface HandInput {x:number;y:number;shoulderX:number;shoulderY:number;scale:number;valid:boolean}
@@ -14,8 +15,14 @@ export function memoryHands(joints:{x:number;y:number;confidence:number}[],prese
   });
 }
 export interface MemorySettings {memoryCount:number;memoryInterval:number;memorySpeed:number;bodyTextSlowdown:number;captureRadius:number;captureHold:number;memoryReleaseTime:number}
-export interface MemoryItem {id:number;record:MemoryRecord;x:number;y:number;speed:number;state:MemoryState;hand:number;age:number;formation:number;release:number;group:number;held:number;emphasis:number}
+export interface MemoryItem {id:number;record:MemoryRecord;x:number;y:number;speed:number;state:MemoryState;hand:number;age:number;formation:number;release:number;group:number;held:number;emphasis:number;removed:boolean;opacity:number}
 const ease=(dt:number,t:number)=>1-Math.exp(-dt/t);
+const ENTRY_X=-.24,EXIT_X=1.3;
+// A full transit must fit inside the requested population, including offscreen travel.
+export function memoryCadence(c:MemorySettings){
+  const count=Math.max(1,Math.min(MAX_MEMORY_INSTANCES,Math.floor(c.memoryCount)));
+  return Math.max(.05,c.memoryInterval,(EXIT_X-ENTRY_X)/(Math.max(.001,c.memorySpeed)*count));
+}
 export class MemoryGestures {
   hands=Array.from({length:2},()=>({x:0,y:0,ready:false,valid:false,dwell:0,lowered:0,armed:true,history:[] as {x:number;t:number}[],speed:0,extended:false}));
   update(input:HandInput[],dt:number,time:number,aspect:number,hold:number){
@@ -51,43 +58,57 @@ export class MemoryInteraction {
   items:MemoryItem[]=[];readonly gestures=new MemoryGestures();
   private serial=0;private spawnClock=100;private time=0;private cooldown=0;private lost=0;
   private seeded=false;
+  nextPriority:()=>MemoryRecord|undefined=()=>undefined;
+  priorityWaiting:()=>boolean=()=>false;
+  removeRecord(id:string){for(const m of this.items)if(m.record.id===id){m.removed=true;m.state='FLOWING';m.hand=-1;}}
   constructor(private random=Math.random){}
   spawn(record:MemoryRecord,x:number,y:number,group=0){
-    const m:MemoryItem={id:++this.serial,record:{...record},x,y,group,speed:1,state:'FLOWING',hand:-1,age:0,formation:1,release:0,held:0,emphasis:0};this.items.push(m);return m;
+    const m:MemoryItem={id:++this.serial,record:{...record},x,y,group,speed:1,state:'FLOWING',hand:-1,age:0,formation:1,release:0,held:0,emphasis:0,removed:false,opacity:1};this.items.push(m);return m;
   }
   update(dt:number,sceneTime:number,aspect:number,records:MemoryRecord[],hands:HandInput[],coverage:(x:number,y:number)=>number,c:MemorySettings){
     if(dt<=0)return;
     this.time+=dt;this.cooldown=Math.max(0,this.cooldown-dt);this.spawnClock+=dt;
     const triggers=this.gestures.update(hands,dt,this.time,aspect,c.captureHold);
+    const interval=memoryCadence(c);
     const pick=()=>records[Math.min(records.length-1,Math.floor(this.random()*records.length))];
     if(!this.seeded&&records.length){
       this.seeded=true;this.spawnClock=0;
-      const count=Math.max(0,Math.min(8-this.items.length,Math.floor(c.memoryCount)-this.items.length));
-      // Jittered screen regions keep the opening populated without clustering everything.
+      const count=this.priorityWaiting()?0:Math.max(0,Math.min(MAX_MEMORY_INSTANCES-this.items.length,Math.floor(c.memoryCount)-this.items.length));
+      // Seed the entire transit, including entry/exit margins, as a running conveyor.
+      // Half-slot phase lets the first departure and the next arrival meet naturally.
+      this.spawnClock=interval*.5;
       const firstGroup=Math.floor(this.random()*3);
       for(let i=0;i<count;i++){
-        const x=.12+.76*(i+.2+this.random()*.6)/count,group=(firstGroup+i)%3;
+        const x=EXIT_X-(i+.5)*c.memorySpeed*interval,group=(firstGroup+i)%3;
+        if(x<ENTRY_X)continue;
         this.spawn(pick(),x,riverSpine(x,group,sceneTime)+(group===0?.058:-.058),group);
       }
     }
     const normal=this.items.filter(m=>m.state==='FLOWING'||m.state==='BODY_SLOWED');
-    if(records.length&&this.spawnClock>=c.memoryInterval&&normal.length<c.memoryCount&&this.items.length<8){
-      const group=this.serial%3;this.spawn(pick(),-.24,riverSpine(-.24,group,sceneTime)+(group===0?.058:-.058),group);this.spawnClock=0;
+    const entryInterval=this.priorityWaiting()?Math.max(.05,c.memoryInterval):interval;
+    this.spawnClock=Math.min(this.spawnClock,entryInterval+dt);
+    // One reserved live-entry slot prevents a full/slow historical screen starving phones.
+    const capacity=normal.length<c.memoryCount||(this.priorityWaiting()&&normal.length<c.memoryCount+1);
+    if(records.length&&this.spawnClock>=entryInterval&&capacity&&this.items.length<MAX_MEMORY_INSTANCES){
+      const group=this.serial%3;this.spawn(this.nextPriority()??pick(),ENTRY_X,riverSpine(ENTRY_X,group,sceneTime)+(group===0?.058:-.058),group);this.spawnClock-=entryInterval;
     }
+    // Full capacity (e.g. body slowdown) must not accumulate a catch-up burst.
+    this.spawnClock=Math.min(this.spawnClock,entryInterval);
     let owned=this.items.find(m=>m.state==='CAPTURED'||m.state==='RELEASING');
     if(!owned&&this.cooldown===0){
       // First hand to finish its dwell wins; left wins only an exact tie.
       const candidates=[0,1].filter(i=>triggers[i]?.capture).sort((a,b)=>this.gestures.hands[b].dwell-this.gestures.hands[a].dwell);
       for(const i of candidates){
         const h=this.gestures.hands[i];
-        const nearest=this.items.filter(m=>m.state==='FLOWING'||m.state==='BODY_SLOWED').map(m=>({m,d:Math.hypot((m.x-h.x)*aspect,m.y-h.y)})).filter(v=>v.d<c.captureRadius).sort((a,b)=>a.d-b.d)[0]?.m;
+        const nearest=this.items.filter(m=>!m.removed&&(m.state==='FLOWING'||m.state==='BODY_SLOWED')).map(m=>({m,d:Math.hypot((m.x-h.x)*aspect,m.y-h.y)})).filter(v=>v.d<c.captureRadius).sort((a,b)=>a.d-b.d)[0]?.m;
         let m=nearest;
-        if(!m&&records.length&&this.items.length<8){m=this.spawn(pick(),h.x,h.y+.045,this.serial%3);m.formation=0;}
+        if(!m&&records.length&&this.items.length<MAX_MEMORY_INSTANCES){m=this.spawn(pick(),h.x,h.y+.045,this.serial%3);m.formation=0;}
         if(m){m.state='CAPTURED';m.hand=i;m.held=0;this.lost=0;owned=m;this.gestures.consume(i);}
         break;
       }
     }
     for(const m of this.items){
+      if(m.removed){m.opacity=Math.max(0,m.opacity-dt/.8);m.x+=c.memorySpeed*dt;continue;}
       // Keep the enlarged silhouette on release; ease back only when capture is cancelled.
       if(m.state==='CAPTURED')m.emphasis=Math.min(1,m.emphasis+dt/3);
       else if(m.state!=='RELEASING')m.emphasis=Math.max(0,m.emphasis-dt/2.5);
@@ -116,7 +137,7 @@ export class MemoryInteraction {
       const target=riverSpine(m.x,m.group,sceneTime)+(m.group===0?.058:-.058);
       m.y+=(target-m.y)*ease(dt*m.speed,.5);
     }
-    this.items=this.items.filter(m=>m.x<1.3&&m.release<1);
+    this.items=this.items.filter(m=>m.x<EXIT_X&&m.release<1&&m.opacity>0);
   }
 }
 

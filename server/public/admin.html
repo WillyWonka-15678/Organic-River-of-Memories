@@ -1,0 +1,8 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>留言管理 · 时光弹幕河</title><link rel="stylesheet" href="/admin/admin.css"><script defer src="/admin/admin.js"></script></head><body><main>
+<header class="bar"><h1>时光弹幕河 · 留言管理</h1><button id="logout">退出登录</button></header>
+<section class="stats" id="stats" aria-label="留言统计"></section>
+<section class="panel bar"><div><h2>自动审核</h2><p id="mode" class="mode">正在读取服务器设置…</p><small>切换只影响此后的提交，不会批量批准已有待审核留言。</small></div><button id="toggle" class="primary" disabled>读取中</button></section>
+<form id="filters" class="filters"><input name="q" placeholder="搜索寄语内容或昵称" aria-label="搜索寄语内容或昵称" maxlength="120"><select name="status" aria-label="审核状态"><option value="">全部状态（不含删除）</option><option value="pending">待审核</option><option value="approved">已通过</option><option value="hidden">已隐藏</option><option value="rejected">已拒绝</option><option value="deleted">已删除</option></select><select name="source" aria-label="留言来源"><option value="">全部来源</option><option value="seed">原有模拟留言</option><option value="user">手机提交</option></select><select name="order" aria-label="时间排序"><option value="desc">最新提交在前</option><option value="asc">最早提交在前</option></select><button type="submit">查询 / 刷新</button></form>
+<p id="feedback" role="status" aria-live="polite"></p><section id="messages" aria-label="留言列表"></section><nav class="pagination"><button id="prev">上一页</button><span id="pageInfo"></span><button id="next">下一页</button></nav><footer class="muted"><p>删除为软删除，记录仍保存在数据库。页面每十秒从服务器刷新，操作冲突时请重新确认状态。</p></footer>
+</main></body></html>
+

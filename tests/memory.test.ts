@@ -1,11 +1,36 @@
 import { describe,it,expect } from 'vitest';
-import { MemoryInteraction,memoryHands,type HandInput } from '../src/memories/MemoryInteraction';
+import { MemoryInteraction,memoryHands,memoryCadence,type HandInput } from '../src/memories/MemoryInteraction';
 import {mapPose,PoseTrack} from '../src/interaction/PoseTrack';
+import {config} from '../src/config';
+import {MAX_MEMORY_INSTANCES} from '../src/memories/limits';
 const settings={memoryCount:0,memoryInterval:8,memorySpeed:.023,bodyTextSlowdown:.08,captureRadius:.18,captureHold:.7,memoryReleaseTime:3.5};
 const records=[{id:'one',message:'愿你始终热爱'}];
 const hand=(x=.7,y=.5):HandInput=>({x,y,shoulderX:.45,shoulderY:.5,scale:.2,valid:true});
 function run(m:MemoryInteraction,seconds:number,h:HandInput[]=[],coverage=0,hz=60){for(let i=0;i<seconds*hz;i++)m.update(1/hz,i/hz,16/9,records,h,()=>coverage,settings);}
 describe('memory interaction',()=>{
+ it('populates the denser opening and bounds frequent generation at the GPU capacity',()=>{
+   const m=new MemoryInteraction(()=>.5);
+   m.update(1/60,0,16/9,records,[],()=>0,config);
+   expect(m.items).toHaveLength(36);
+   expect(new Set(m.items.map(v=>v.group)).size).toBe(3);
+   for(let i=0;i<800;i++)m.update(.1,i*.1,16/9,records,[],()=>1,{...config,memoryCount:100,memoryInterval:.25});
+   expect(m.items).toHaveLength(MAX_MEMORY_INSTANCES);
+   expect(m.items.every(v=>v.record.message===records[0].message&&v.release===0)).toBe(true);
+ });
+ it.each([30,120])('keeps arrivals evenly paced across several full transits at %s Hz',hz=>{
+   const m=new MemoryInteraction(()=>.5),arrivals:number[]=[];
+   m.update(1/hz,0,16/9,records,[],()=>0,config);
+   let last=Math.max(...m.items.map(v=>v.id));
+   for(let i=1;i<hz*210;i++){
+     m.update(1/hz,i/hz,16/9,records,[],()=>0,config);
+     const newest=Math.max(...m.items.map(v=>v.id));
+     if(newest>last){arrivals.push(i/hz);last=newest;}
+     expect(m.items.length).toBeLessThanOrEqual(config.memoryCount);
+     expect(m.items.filter(v=>v.x>=0&&v.x<=1).length).toBeGreaterThanOrEqual(22);
+   }
+   expect(arrivals.length).toBeGreaterThan(100);
+   for(let i=1;i<arrivals.length;i++)expect(Math.abs(arrivals[i]-arrivals[i-1]-memoryCadence(config))).toBeLessThan(2/hz);
+ });
  it.each([0,1])('either arm captures and enlarges when reaching left with opposite shoulder occluded: %s',(side)=>{
    const pose=new PoseTrack(),m=new MemoryInteraction();const item=m.spawn(records[0],.49,.55);
    for(let i=1;i<=360;i++){

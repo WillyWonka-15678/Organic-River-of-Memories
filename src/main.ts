@@ -8,6 +8,8 @@ import { PresenceField } from './interaction/PresenceField';
 import { demoSilhouette } from './interaction/demoSilhouette';
 import { PoseTrack } from './interaction/PoseTrack';
 import { torsoSample, headSample } from './interaction/BodyWake';
+import { MemorySync } from './integrations/MemorySync';
+import {displaySettings,exhibitionUI} from './integrations/ExhibitionUI';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const query = new URLSearchParams(location.search);
@@ -27,6 +29,9 @@ const previewImage = previewCtx.createImageData(body.width, body.height);
 let river: River;
 try { river = new River($<HTMLCanvasElement>('river'), config, field.texture); }
 catch (error) { status(`GPU 初始化失败：${String(error)}`); throw error; }
+const memorySync=new MemorySync(river.memories.pool,displaySettings.serverUrl);
+const disposeExhibitionUI=exhibitionUI(memorySync);
+window.addEventListener('beforeunload',()=>{disposeExhibitionUI();memorySync.dispose();});
 const gui = new GUI({ title: '时光弹幕河 / 创作参数', width: 285 });
 gui.add(config, 'stage', { '1 自然流场': 1, '2 人体感知': 2, '3 丝绸与光尘': 3, '4 记忆文字': 4 }).name('创作阶段');
 gui.add(config, 'count', { '16,384': 16384, '32,768': 32768, '65,536': 65536, '131,072': 131072, '262,144': 262144 }).name('粒子数量').onFinishChange((v: number) => river.rebuild(v));
@@ -56,8 +61,8 @@ gui.add(config, 'mirror').name('镜像摄像头');
 gui.add(config, 'showMask').name('显示轮廓调试').onChange((v: boolean) => { preview.hidden = !v; });
 gui.add(config, 'inferenceFps', 5, 30, 1).name('分割目标 FPS');
 const memoryPanel=gui.addFolder('记忆交互');
-memoryPanel.add(config,'memoryCount',1,6,1).name('漂流留言上限');
-memoryPanel.add(config,'memoryInterval',3,20,.5).name('生成间隔 / 秒');
+memoryPanel.add(config,'memoryCount',1,60,1).name('漂流留言上限');
+memoryPanel.add(config,'memoryInterval',.25,20,.25).name('生成间隔 / 秒');
 memoryPanel.add(config,'memorySpeed',.01,.06,.001).name('文字漂流速度');
 memoryPanel.add(config,'bodyTextSlowdown',.03,.15,.01).name('人体内速度倍率');
 memoryPanel.add(config,'captureRadius',.08,.3,.01).name('拾忆范围');
@@ -111,25 +116,28 @@ let cameraStart:Promise<void>|undefined;
 async function startCamera(){
   if(cameraStart)return cameraStart;
   cameraButton.disabled = true;
-  cameraButton.textContent='正在开启摄像头…';
+  cameraButton.textContent='正在开启摄像头… C';
   cameraStart=(async()=>{
-    try { await body.start(); cameraButton.textContent = body.running ? '关闭摄像头' : '开启摄像头'; }
-    catch { cameraButton.textContent = '开启摄像头'; }
+    try { await body.start(); cameraButton.textContent = body.running ? '关闭摄像头 C' : '开启摄像头 C'; }
+    catch { cameraButton.textContent = '开启摄像头 C'; }
     finally { cameraButton.disabled = false; cameraStart=undefined; }
   })();
   return cameraStart;
 }
 cameraButton.onclick = async () => {
-  if (body.running) { body.stop(); cameraButton.textContent = '开启摄像头'; status('摄像头已关闭 · 记忆慢慢散去'); return; }
+  if (body.running) { body.stop(); cameraButton.textContent = '开启摄像头 C'; status('摄像头已关闭 · 记忆慢慢散去'); return; }
   await startCamera();
 };
 // Request permission as soon as the experience opens; browsers still require the visitor to grant it.
 if(query.get('camera')!=='off')void startCamera();
 document.addEventListener('keydown', event => {
+  if(event.isComposing||event.ctrlKey||event.altKey||event.metaKey)return;
+  if(event.target instanceof HTMLElement&&(event.target.isContentEditable||event.target instanceof HTMLTextAreaElement))return;
   if (event.target instanceof HTMLInputElement && !['checkbox','range','button'].includes(event.target.type)) return;
   if (event.key.toLowerCase() === 'd') toggleDebug();
   if (event.key.toLowerCase() === 'h') document.body.classList.toggle('clean');
   if (event.key.toLowerCase() === 'f') $('fullscreen').click();
+  if (event.key.toLowerCase() === 'c'&&!event.repeat) cameraButton.click();
 });
 window.addEventListener('resize', () => river.resize());
 $('river').addEventListener('webglcontextlost', event => { event.preventDefault(); status('GPU 上下文丢失，请重新加载页面恢复。'); });
@@ -140,6 +148,10 @@ let timeOffset = 0;
 if (import.meta.env.DEV && query.has('qa')) {
   Object.defineProperty(window, '__riverQA', { value: {
     memoryState:()=>river.memories.interaction.items.map(m=>({...m})),
+    memoryNetwork:()=>({connected:memorySync.socket.connected,state:memorySync.state,lastSync:memorySync.lastSyncTime,pool:[...river.memories.pool.records.values()],queue:[...river.memories.pool.queue]}),
+    memoryDisconnect:()=>memorySync.socket.disconnect(),
+    memoryReconnect:()=>memorySync.socket.connect(),
+    memoryTiming:(interval:number)=>{config.memoryInterval=interval;},
     placeMemory:(x:number,y:number)=>river.memories.interaction.spawn({id:'qa-memory',message:'愿你始终热爱'},x,y),
     clearMemories:()=>{river.memories.interaction.items=[];},
     pauseStudy:()=>{studyPaused=true;studyTime=diagnostics.time;},
@@ -197,7 +209,7 @@ function animate(now: number) {
   if (now-sampleTime>1000) {
     diagnostics.fps=Math.round(frames*1000/(now-sampleTime)); frames=0; sampleTime=now;
     $('metrics').textContent=`${diagnostics.fps} FPS / ${river.actualCount.toLocaleString()} PARTICLES / ${body.running?'CAMERA':active?'CONTOUR STUDY':'MEMORY RIVER'}`;
-    if(!body.running&&!cameraStart)cameraButton.textContent='开启摄像头';
+    if(!body.running&&!cameraStart)cameraButton.textContent='开启摄像头 C';
   }
   Object.assign(diagnostics,{ frames:diagnostics.frames+1,time:t,stage:config.stage,particleCount:river.actualCount,camera:body.running,coverage:body.coverage,lastMaskTime:body.lastMaskTime,presence:field.presence,
     poseReady:body.poseReady,lastPoseTime:body.lastPoseTime,poseNodes:poseTrack.visibleNodes,formation:poseTrack.formation,poseMotion:poseTrack.motion,

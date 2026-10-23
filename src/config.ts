@@ -1,7 +1,7 @@
 export const config = {
   count: 65536, speed: 0.12, repulsion: 0.65, radius: 0.13,
   breathing: 1.0, stage: 4, silk: 0.65, memories: true, exposure: 1.35,
-  memoryCount:5,memoryInterval:8,memorySpeed:.023,bodyTextSlowdown:.08,captureRadius:.18,captureHold:.7,memoryReleaseTime:3.5,
+  memoryCount:36,memoryInterval:1.5,memorySpeed:.023,bodyTextSlowdown:.08,captureRadius:.18,captureHold:.7,memoryReleaseTime:3.5,
   noise: 0.65, trails: 0.94, size: 2.2,
   palette:'tealViolet',secondaryRatio:.20,saturation:1.0,colorSpeed:1.0,interactionColor:.65,bloom:.28,
   color: '#43b6aa', accent: '#e5b979', recovery: 1.8,

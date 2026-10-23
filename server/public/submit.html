@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>拾起一段毕业记忆 · 时光弹幕河</title>
+<style>
+*{box-sizing:border-box}body{margin:0;padding:28px 20px 48px;background:#07171b;color:#e0f1ed;font:16px/1.6 system-ui,"Microsoft YaHei",sans-serif}main{max-width:480px;margin:auto}small,.hint{color:#a3bdb8}h1{font-size:27px;margin-bottom:8px}.eyebrow{color:#e5bb81;letter-spacing:3px;font-size:12px}label{display:block;margin-top:20px}input,textarea,button{width:100%;font:inherit;border-radius:9px}input,textarea{margin-top:7px;padding:12px;background:#0e2428;border:1px solid #365550;color:#f1f7f5}input:focus,textarea:focus{outline:2px solid #65d5c8}textarea{resize:vertical;min-height:135px}button{margin-top:22px;border:0;padding:14px;background:#65d5c8;color:#092621;font-weight:600;cursor:pointer}button:disabled{opacity:.5;cursor:wait}.count{text-align:right;margin:3px 0;color:#a3bdb8}.count.over{color:#f3b299}#result{white-space:pre-wrap;overflow-wrap:anywhere;color:#e5bb81;min-height:52px}footer{margin-top:24px;font-size:13px;color:#a3bdb8}
+</style></head><body><main>
+<p class="eyebrow">ORGANIC RIVER OF MEMORIES</p><h1>留下你的毕业记忆</h1><p class="hint">让此刻的心意，留在时间的长河里。</p>
+<form id="form">
+<label for="name">姓名或昵称 <small>选填</small></label><input id="name" name="name" maxlength="20" placeholder="匿名毕业生" autocomplete="nickname">
+<label for="major">专业 <small>选填</small></label><input id="major" name="major" maxlength="40" placeholder="你的专业">
+<label for="year">毕业年份 <small>选填</small></label><input id="year" name="year" type="text" inputmode="numeric" maxlength="4" value="2026" placeholder="2026">
+<label for="content">毕业寄语 <small>必填，最多 60 字</small></label><textarea id="content" name="content" required placeholder="写下想留给未来的一句话…" aria-describedby="count"></textarea>
+<p class="count" id="count" aria-live="polite">0 / 60</p><button id="send" type="submit">送出这段记忆</button>
+</form><p id="result" role="status" aria-live="polite"></p><footer>记忆将被妥善保存，审核通过后随河流漂入大屏。</footer>
+</main><script>
+const form=document.querySelector('#form'),content=document.querySelector('#content'),count=document.querySelector('#count'),button=document.querySelector('#send'),result=document.querySelector('#result');
+let composing=false,busy=false;
+function updateCount(){const length=[...content.value].length;count.textContent=`${length} / 60`;count.classList.toggle('over',length>60);}
+content.addEventListener('compositionstart',()=>composing=true);
+content.addEventListener('compositionend',()=>{composing=false;updateCount();});
+content.addEventListener('input',updateCount);
+form.addEventListener('submit',async event=>{
+ event.preventDefault();if(busy||composing)return;
+ const data=Object.fromEntries(new FormData(form));for(const key of Object.keys(data))data[key]=data[key].trim();
+ if(!data.content){result.textContent='请填写毕业寄语，不能只有空格。';return;}
+ if([...data.content].length>60){result.textContent='毕业寄语最多 60 个字符，请稍作精简。';return;}
+ if(data.year&&!/^\d{4}$/.test(data.year)){result.textContent='请填写四位毕业年份。';return;}
+ busy=true;button.disabled=true;button.textContent='正在保存…';result.textContent='';
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
+ try{
+   const response=await fetch('/api/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:controller.signal});
+   const reply=await response.json();if(!response.ok||!reply.ok)throw new Error(reply.message||`HTTP ${response.status}`);
+   result.textContent=reply.message;form.reset();updateCount();
+ }catch(error){result.textContent=error.name==='AbortError'?'请求超时，保存结果尚未确认，请联系现场工作人员确认后再提交。':error instanceof TypeError?'网络连接失败，请检查手机热点与电脑服务；保存结果可能尚未确认。':error.message;}
+ finally{clearTimeout(timer);busy=false;button.disabled=false;button.textContent='送出这段记忆';}
+});
+</script></body></html>

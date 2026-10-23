@@ -1,0 +1,31 @@
+import {existsSync,readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {resolve,dirname} from 'node:path';
+import {networkInterfaces} from 'node:os';
+export const root=fileURLToPath(new URL('../',import.meta.url));
+export function runtimeConfig(env=process.env){
+ const file=resolve(root,env.EXHIBITION_CONFIG||'config/exhibition.local.json');
+ const local=existsSync(file)?JSON.parse(readFileSync(file,'utf8')):{};
+ const get=(key,fallback)=>env[key]??local[key]??fallback;
+ const integer=(key,fallback,min,max)=>{const n=Number(get(key,fallback));if(!Number.isInteger(n)||n<min||n>max)throw Error(`${key} 必须为 ${min}–${max} 整数`);return n;};
+ const bool=(key,fallback)=>{const v=get(key,fallback);if(![true,false,'true','false'].includes(v))throw Error(`${key} 必须为 true/false`);return String(v)==='true';};
+ const port=integer('PORT',3000,1,65535),mode=get('NETWORK_MODE','lan');
+ if(!['lan','public'].includes(mode))throw Error('NETWORK_MODE 必须为 lan/public');
+ const candidates=Object.entries(networkInterfaces()).flatMap(([name,items])=>(items||[]).filter(a=>a.family==='IPv4'&&!a.internal&&!a.address.startsWith('169.254.')).map(a=>({name,address:a.address})));
+ const preferred=get('LAN_INTERFACE','');
+ const selected=candidates.filter(a=>!preferred||a.name===preferred).sort((a,b)=>Number(/WLAN|Wi-Fi|无线/i.test(b.name))-Number(/WLAN|Wi-Fi|无线/i.test(a.name)))[0];
+ const configured=get('PUBLIC_SUBMIT_URL','');
+ const url=configured|| (mode==='lan'&&selected?`http://${selected.address}:${port}/submit`:'');
+ if(!url&&mode==='public')throw Error('公网模式必须配置 PUBLIC_SUBMIT_URL');
+ const parsed=url?new URL(url):null;
+ if(parsed&&(!['http:','https:'].includes(parsed.protocol)||parsed.username||parsed.password||parsed.search||parsed.hash||parsed.pathname!=='/submit'||['localhost','0.0.0.0','127.0.0.1','example.com','example.org'].includes(parsed.hostname)||parsed.hostname.endsWith('.example.com')))throw Error('PUBLIC_SUBMIT_URL 必须是真实手机可访问的 http(s) /submit 地址，不能用示例或回环地址');
+ if(mode==='public'&&parsed?.protocol!=='https:')throw Error('公网模式必须使用 HTTPS');
+ const backupDir=resolve(root,get('BACKUP_DIR','backups'));
+ const databasePath=resolve(root,get('DATABASE_PATH','data/messages.sqlite'));
+ const canonical=p=>resolve(p).replaceAll('\\','/').toLowerCase();
+ const isInside=(p,parent)=>canonical(p)===canonical(parent)||canonical(p).startsWith(canonical(parent)+'/');
+ if(['public','dist','server/public'].some(p=>isInside(backupDir,resolve(root,p))||isInside(databasePath,resolve(root,p))))throw Error('数据库和备份不能放在公开 HTTP 目录');
+ if(canonical(backupDir)===canonical(dirname(databasePath)))throw Error('备份目录必须与正式数据库目录分离');
+ const displayOnly=bool('DISPLAY_ONLY',false);if(displayOnly&&mode!=='public')throw Error('DISPLAY_ONLY 仅适用于配置了真实远程域名的公网模式');
+ return {port,mode,displayOnly,submitUrl:parsed?.href||'',serverUrl:mode==='public'?parsed.origin:'',showQr:bool('SHOW_QR',true),exhibitionMode:bool('EXHIBITION_MODE',false),databasePath,backupDir,backupMinutes:integer('BACKUP_INTERVAL_MINUTES',60,0,10080),retentionDays:integer('BACKUP_RETENTION_DAYS',14,1,3650),candidates};
+}

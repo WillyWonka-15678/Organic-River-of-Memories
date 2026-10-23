@@ -1,0 +1,8 @@
+{
+  "NETWORK_MODE": "public",
+  "PUBLIC_SUBMIT_URL": "",
+  "DISPLAY_ONLY": true,
+  "SHOW_QR": true,
+  "EXHIBITION_MODE": true,
+  "PORT": 3000
+}

@@ -6,3 +6,12 @@ playwright-report/
 public/mediapipe/
 public/models/
 public/workers/
+data/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+backups/
+exports/
+config/exhibition.local.json
+*.service-lock

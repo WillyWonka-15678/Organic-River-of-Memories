@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>《时光弹幕河》连接测试</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#07171b;color:#e1f4f0;font:17px/1.7 system-ui,"Microsoft YaHei",sans-serif;padding:32px 20px}main{max-width:480px;margin:8vh auto}h1{font-size:26px;line-height:1.5}p{overflow-wrap:anywhere}button{width:100%;min-height:54px;border:0;border-radius:10px;background:#65d5c8;color:#08211e;font:inherit;font-weight:600;cursor:pointer}button:disabled{opacity:.5;cursor:wait}#result{min-height:90px;padding:16px;border:1px solid #31524f;border-radius:10px}small{color:#a1bcb7}
+  </style>
+</head>
+<body><main>
+  <h1>《时光弹幕河》连接测试</h1>
+  <p id="status" role="status">正在检查服务器连接…</p>
+  <button id="send" type="button">发送测试请求</button>
+  <p id="result" role="status" aria-live="polite">点击按钮，测试手机与电脑之间的连接。</p>
+  <small>请保持手机热点开启，并让电脑连接该热点。</small>
+</main>
+<script>
+  const status = document.querySelector('#status'), result = document.querySelector('#result'), button = document.querySelector('#send');
+  async function request(path, options = {}) {
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const response = await fetch(path, { ...options, signal: controller.signal, cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.message || `HTTP ${response.status}`);
+      return data;
+    } catch (error) {
+      throw new Error(error.name === 'AbortError' ? '请求超时，请检查热点、电脑地址和防火墙。' : error instanceof TypeError ? '无法连接服务器，请检查热点连接与电脑服务是否启动。' : error.message);
+    } finally { clearTimeout(timer); }
+  }
+  request('/api/health').then(() => status.textContent = '服务器已连接').catch(error => status.textContent = `服务器连接失败：${error.message}`);
+  button.addEventListener('click', async () => {
+    button.disabled = true; result.textContent = '正在发送测试请求…';
+    try {
+      await request('/api/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: 'connection-test' }) });
+      status.textContent = '服务器已连接'; result.textContent = '连接成功，电脑已收到请求';
+    } catch (error) { status.textContent = '请求失败'; result.textContent = `发送失败：${error.message}`; }
+    finally { button.disabled = false; }
+  });
+</script></body></html>
